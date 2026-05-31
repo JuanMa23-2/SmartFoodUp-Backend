@@ -3,26 +3,33 @@ plugins {
     alias(libs.plugins.ktor)
 }
 
-group = "com.example.prueba_multiplataforma"
+group = "com.example.smartfoodup"
 version = "1.0.0"
 application {
-    mainClass = "com.example.prueba_multiplataforma.ApplicationKt"
+    mainClass = "com.example.smartfoodup.ApplicationKt"
 }
 
 dependencies {
+    // Proyectos internos del Multiplatform
     api(projects.core)
+
+    // Logs del servidor
     implementation(libs.logback)
+
+    // Servidor Ktor (Usando la configuración nativa de tu catálogo)
     implementation(libs.ktor.serverCore)
     implementation(libs.ktor.serverNetty)
+
+    // =======================================================
+    // 🗄️ BASE DE DATOS: Exposed ORM & MySQL Driver
+    // =======================================================
+    implementation("org.jetbrains.exposed:exposed-core:0.41.1")
+    implementation("org.jetbrains.exposed:exposed-dao:0.41.1")
+    implementation("org.jetbrains.exposed:exposed-jdbc:0.41.1")
+    implementation("mysql:mysql-connector-java:8.0.33")
+    // =======================================================
+
+    // Pruebas unitarias
     testImplementation(libs.ktor.serverTestHost)
     testImplementation(libs.kotlin.testJunit)
-    // 1. El Conector oficial para comunicarnos con MySQL de Railway
-    implementation("mysql:mysql-connector-java:8.0.33")
-    // 2. El framework 'Exposed' de JetBrains (ORM para manejar la BD con código Kotlin limpio)
-    implementation("org.jetbrains.exposed:exposed-core:0.42.0")
-    implementation("org.jetbrains.exposed:exposed-dao:0.42.0")
-    implementation("org.jetbrains.exposed:exposed-jdbc:0.42.0")
-    // 3. Herramienta ligera para proteger las contraseñas en el Login (BCrypt)
-    implementation("org.mindrot:jbcrypt:0.4")
-
 }
