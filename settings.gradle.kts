@@ -1,4 +1,4 @@
-rootProject.name = "SmartFoodUp"
+rootProject.name = "Pruebamultiplataforma"
 enableFeaturePreview("TYPESAFE_PROJECT_ACCESSORS")
 
 pluginManagement {

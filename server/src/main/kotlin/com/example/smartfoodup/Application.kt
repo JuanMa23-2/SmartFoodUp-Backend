@@ -52,12 +52,7 @@ fun Application.configureDatabase() {
 
     // Bloque transaccional que crea las 5 tablas en phpMyAdmin si no existen
     transaction {
-        SchemaUtils.create(
-            Usuarios,
-            Restaurantes,
-            Categorias,
-            Productos,
-            Pedidos
-        )
+        // Esto borra la vieja estructura e inyecta el ecosistema de IA automáticamente
+        SchemaUtils.create(Usuarios, Dispositivos, MedicionesSensores, AnalisisIa, RecomendacionesConsumo)
     }
 }
