@@ -31,7 +31,7 @@ kotlin {
     }
     
     androidLibrary {
-       namespace = "com.example.prueba_multiplataforma.app.shared"
+       namespace = "com.example.smartfoodup.app.shared"
        compileSdk = libs.versions.android.compileSdk.get().toInt()
        minSdk = libs.versions.android.minSdk.get().toInt()
     

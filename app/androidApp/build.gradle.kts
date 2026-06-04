@@ -22,7 +22,7 @@ dependencies {
 }
 
 android {
-    namespace = "com.example.prueba_multiplataforma"
+    namespace = "com.example.smartfoodup"
     compileSdk = libs.versions.android.compileSdk.get().toInt()
 
     defaultConfig {
