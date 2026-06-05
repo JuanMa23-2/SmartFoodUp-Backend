@@ -12,14 +12,16 @@ import org.jetbrains.exposed.sql.transactions.transaction
 // ==========================================
 // 🛠️ IMPORTACIÓN DE TUS TABLAS NATIVAS
 // ==========================================
-// Esto enlaza Usuarios, Restaurantes, Categorias, Productos y Pedidos automáticamente
 import com.example.smartfoodup.*
 
 // ==========================================
-// 1. ARRANQUE DEL SERVIDOR (Netty)
+// 1. ARRANQUE DEL SERVIDOR (Puerto Dinámico)
 // ==========================================
 fun main() {
-    embeddedServer(Netty, port = 8080, host = "0.0.0.0", module = Application::module)
+    // Railway asigna un puerto aleatorio en la variable PORT. Si no existe, usa el 8080 por defecto.
+    val port = System.getenv("PORT")?.toInt() ?: 8080
+
+    embeddedServer(Netty, port = port, host = "0.0.0.0", module = Application::module)
         .start(wait = true)
 }
 
@@ -33,26 +35,43 @@ fun Application.module() {
     // Configuración de las rutas de consulta (Endpoints)
     routing {
         get("/") {
-            call.respondText("¡Servidor Ktor de SmartFoodUp conectado exitosamente a MySQL!")
+            call.respondText("¡Servidor Ktor de SmartFoodUp conectado exitosamente a MySQL en la Nube!")
         }
     }
 }
 
 // ==========================================
-// 3. CONFIGURACIÓN DE CONEXIÓN A MYSQL
+// 3. CONFIGURACIÓN DE CONEXIÓN A MYSQL HÍBRIDA
 // ==========================================
 fun Application.configureDatabase() {
-    // Conexión segura al contenedor local de XAMPP
+    // 1. Intentar leer las variables de entorno de Railway
+    val host = System.getenv("MYSQLHOST")
+    val port = System.getenv("MYSQLPORT") ?: "3306"
+    val database = System.getenv("MYSQLDATABASE")
+    val user = System.getenv("MYSQLUSER")
+    val password = System.getenv("MYSQLPASSWORD")
+
+    val jdbcUrl = if (host != null) {
+        // URL de Producción para Railway
+        "jdbc:mysql://$host:$port/$database?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true"
+    } else {
+        // URL Local de respaldo para XAMPP
+        "jdbc:mysql://localhost:3306/smartfoodup?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true"
+    }
+
+    val dbUser = user ?: "root"
+    val dbPassword = password ?: ""
+
+    // Conexión final usando los datos calculados
     Database.connect(
-        url = "jdbc:mysql://localhost:3306/smartfoodup?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true",
+        url = jdbcUrl,
         driver = "com.mysql.cj.jdbc.Driver",
-        user = "root",      // Usuario por defecto en XAMPP
-        password = ""       // Contraseña por defecto en XAMPP (vacía)
+        user = dbUser,
+        password = dbPassword
     )
 
-    // Bloque transaccional que crea las 5 tablas en phpMyAdmin si no existen
+    // Bloque transaccional que crea las 5 tablas en Railway o XAMPP si no existen
     transaction {
-        // Esto borra la vieja estructura e inyecta el ecosistema de IA automáticamente
         SchemaUtils.create(Usuarios, Dispositivos, MedicionesSensores, AnalisisIa, RecomendacionesConsumo)
     }
 }
