@@ -26,7 +26,7 @@ class SmartFoodApiService {
      */
     suspend fun checkServerStatus(): String {
         return try {
-            val response: HttpResponse = httpClient.get("http://10.0.2.2:8080/")
+            val response: HttpResponse = httpClient.get("https://smartfoodup-production.up.railway.app/")
             response.bodyAsText() // Retorna el texto de éxito que configuramos en Ktor
         } catch (e: Exception) {
             "Error de conexión con el backend: ${e.message}"
