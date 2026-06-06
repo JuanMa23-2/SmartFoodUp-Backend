@@ -10,7 +10,7 @@ import org.jetbrains.exposed.sql.SchemaUtils
 import org.jetbrains.exposed.sql.transactions.transaction
 
 // ==========================================
-// 🛠️ IMPORTACIÓN DE TUS TABLAS NATIVAS
+// 🛠️ IMPORTACIÓN DE TUS TABLAS NATIVAS Y RUTAS
 // ==========================================
 import com.example.smartfoodup.*
 
@@ -37,6 +37,9 @@ fun Application.module() {
         get("/") {
             call.respondText("¡Servidor Ktor de SmartFoodUp conectado exitosamente a MySQL en la Nube!")
         }
+
+        // 🔌 CONEXIÓN DEL ENDPOINT DE AUTENTICACIÓN (Registro/Login)
+        authRouting()
     }
 }
 
