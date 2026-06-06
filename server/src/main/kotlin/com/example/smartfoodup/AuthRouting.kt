@@ -12,13 +12,10 @@ import org.jetbrains.exposed.sql.select
 fun Route.authRouting() {
     route("/auth") {
 
-        // Endpoint: POST https://.../auth/register
+        // 1. ENDPOINT: POST /auth/register
         post("/register") {
             try {
-                // 1. Recibe el JSON enviado por el celular y lo transforma al objeto Kotlin
                 val request = call.receive<RegistroRequest>()
-
-                // Validación básica de campos vacíos
                 if (request.nombre.isBlank() || request.email.isBlank() || request.password.isBlank()) {
                     call.respond(HttpStatusCode.BadRequest, AuthResponse(false, "Todos los campos son obligatorios"))
                     return@post
@@ -27,33 +24,69 @@ fun Route.authRouting() {
                 var usuarioIdGenerado: Int? = null
                 var emailYaExiste = false
 
-                // 2. Operación segura en la Base de Datos mediante Exposed ORM
                 transaction {
-                    // Verificamos si el email ya está registrado en la tabla Usuarios
                     val existe = Usuarios.select { Usuarios.email eq request.email }.count() > 0
                     if (existe) {
                         emailYaExiste = true
                     } else {
-                        // Insertamos el nuevo registro en MySQL usando tu objeto Usuarios
                         val insertStatement = Usuarios.insert {
                             it[nombre] = request.nombre
                             it[email] = request.email
-                            // Guardamos la contraseña (recuerda que en el futuro le pondremos hash)
                             it[passwordHash] = request.password
                         }
                         usuarioIdGenerado = insertStatement[Usuarios.id]
                     }
                 }
 
-                // 3. Responder al Frontend según el resultado de la transacción
                 if (emailYaExiste) {
                     call.respond(HttpStatusCode.Conflict, AuthResponse(false, "El correo electrónico ya está registrado"))
                 } else {
                     call.respond(HttpStatusCode.Created, AuthResponse(true, "¡Usuario creado exitosamente!", usuarioIdGenerado))
                 }
+            } catch (e: Exception) {
+                call.respond(HttpStatusCode.InternalServerError, AuthResponse(false, "Error en el servidor: ${e.localizedMessage}"))
+            }
+        }
+
+        // ENDPOINT: POST /auth/login
+        post("/login") {
+            try {
+                // El login solo necesita email y password, reutilizamos el mismo mapeo (ignora el nombre)
+                val request = call.receive<RegistroRequest>()
+
+                if (request.email.isBlank() || request.password.isBlank()) {
+                    call.respond(HttpStatusCode.BadRequest, AuthResponse(false, "Correo y contraseña requeridos"))
+                    return@post
+                }
+
+                var loginExitoso = false
+                var usuarioIdEncontrado: Int? = null
+                var mensajeRespuesta = "Usuario no encontrado"
+
+                transaction {
+                    // Buscamos el usuario por su email
+                    val usuarioRow = Usuarios.select { Usuarios.email eq request.email }.singleOrNull()
+
+                    if (usuarioRow != null) {
+                        val passwordEnBd = usuarioRow[Usuarios.passwordHash]
+                        // Comparamos contraseñas (por ahora texto plano)
+                        if (passwordEnBd == request.password) {
+                            loginExitoso = true
+                            usuarioIdEncontrado = usuarioRow[Usuarios.id]
+                            mensajeRespuesta = "¡Inicio de sesión exitoso!"
+                        } else {
+                            mensajeRespuesta = "Contraseña incorrecta"
+                        }
+                    }
+                }
+
+                if (loginExitoso) {
+                    call.respond(HttpStatusCode.OK, AuthResponse(true, mensajeRespuesta, usuarioIdEncontrado))
+                } else {
+                    call.respond(HttpStatusCode.Unauthorized, AuthResponse(false, mensajeRespuesta))
+                }
 
             } catch (e: Exception) {
-                // Manejo de errores en caso de fallas de red o de parseo JSON
                 call.respond(HttpStatusCode.InternalServerError, AuthResponse(false, "Error en el servidor: ${e.localizedMessage}"))
             }
         }

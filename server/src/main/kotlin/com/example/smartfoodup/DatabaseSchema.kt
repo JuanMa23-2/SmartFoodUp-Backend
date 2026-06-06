@@ -13,16 +13,13 @@ import java.time.LocalDateTime
 object DatabaseFactory {
     fun init() {
         // 1. Intenta leer las variables de entorno que te da Railway en la nube.
-        // Si no existen (porque estás en tu PC), toma por defecto los valores de XAMPP.
         val host = System.getenv("MYSQLHOST") ?: "localhost"
         val port = System.getenv("MYSQLPORT") ?: "3306"
         val database = System.getenv("MYSQLDATABASE") ?: "smartfoodup"
         val user = System.getenv("MYSQLUSER") ?: "root"
-        val password = System.getenv("MYSQLPASSWORD") ?: "" // Vacío por defecto en XAMPP
-
+        val password = System.getenv("MYSQLPASSWORD") ?: ""
         // 2. Armamos la URL de conexión JDBC de forma dinámica
         val url = "jdbc:mysql://$host:$port/$database?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true"
-
         // 3. Inicializa el motor de Exposed con los datos calculados
         Database.connect(
             url = url,

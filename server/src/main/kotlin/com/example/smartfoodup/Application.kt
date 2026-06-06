@@ -38,7 +38,7 @@ fun Application.module() {
             call.respondText("¡Servidor Ktor de SmartFoodUp conectado exitosamente a MySQL en la Nube!")
         }
 
-        // 🔌 CONEXIÓN DEL ENDPOINT DE AUTENTICACIÓN (Registro/Login)
+        // CONEXIÓN DEL ENDPOINT DE AUTENTICACIÓN (Registro/Login)
         authRouting()
     }
 }
@@ -73,7 +73,7 @@ fun Application.configureDatabase() {
         password = dbPassword
     )
 
-    // Bloque transaccional que crea las 5 tablas en Railway o XAMPP si no existen
+    // Bloque transaccional que crea las 5 tablas en Railway si no existen
     transaction {
         SchemaUtils.create(Usuarios, Dispositivos, MedicionesSensores, AnalisisIa, RecomendacionesConsumo)
     }
