@@ -13,7 +13,7 @@ dependencies {
 
     // Logs del servidor
     implementation(libs.logback)
-
+    implementation("org.mindrot:jbcrypt:0.4")
     // Servidor Ktor (Usando la configuración nativa de tu catálogo)
     implementation(libs.ktor.serverCore)
     implementation(libs.ktor.serverNetty)

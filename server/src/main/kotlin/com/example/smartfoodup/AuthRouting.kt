@@ -8,6 +8,7 @@ import io.ktor.server.routing.*
 import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.transactions.transaction
 import org.jetbrains.exposed.sql.select
+import org.mindrot.jbcrypt.BCrypt
 
 fun Route.authRouting() {
     route("/auth") {
@@ -24,6 +25,9 @@ fun Route.authRouting() {
                 var usuarioIdGenerado: Int? = null
                 var emailYaExiste = false
 
+                // 🔑 Encriptamos la contraseña antes de entrar a la transacción de la Base de Datos
+                val passwordHasheada = BCrypt.hashpw(request.password, BCrypt.gensalt())
+
                 transaction {
                     val existe = Usuarios.select { Usuarios.email eq request.email }.count() > 0
                     if (existe) {
@@ -32,7 +36,7 @@ fun Route.authRouting() {
                         val insertStatement = Usuarios.insert {
                             it[nombre] = request.nombre
                             it[email] = request.email
-                            it[passwordHash] = request.password
+                            it[passwordHash] = passwordHasheada
                         }
                         usuarioIdGenerado = insertStatement[Usuarios.id]
                     }
@@ -48,10 +52,9 @@ fun Route.authRouting() {
             }
         }
 
-        // ENDPOINT: POST /auth/login
+        // 2. ENDPOINT: POST /auth/login
         post("/login") {
             try {
-                // El login solo necesita email y password, reutilizamos el mismo mapeo (ignora el nombre)
                 val request = call.receive<RegistroRequest>()
 
                 if (request.email.isBlank() || request.password.isBlank()) {
@@ -69,8 +72,9 @@ fun Route.authRouting() {
 
                     if (usuarioRow != null) {
                         val passwordEnBd = usuarioRow[Usuarios.passwordHash]
-                        // Comparamos contraseñas (por ahora texto plano)
-                        if (passwordEnBd == request.password) {
+
+                        // 🔑 Verificación segura usando BCrypt (compara el texto plano con el hash de la BD)
+                        if (BCrypt.checkpw(request.password, passwordEnBd)) {
                             loginExitoso = true
                             usuarioIdEncontrado = usuarioRow[Usuarios.id]
                             mensajeRespuesta = "¡Inicio de sesión exitoso!"
