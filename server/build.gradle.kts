@@ -10,8 +10,6 @@ application {
 }
 
 dependencies {
-    // Proyectos internos del Multiplatform
-    api(projects.core)
 
     // Logs del servidor
     implementation(libs.logback)

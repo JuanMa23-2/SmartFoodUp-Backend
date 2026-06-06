@@ -1,4 +1,4 @@
-rootProject.name = "Pruebamultiplataforma"
+rootProject.name = "SmartFoodUp-Backend"
 enableFeaturePreview("TYPESAFE_PROJECT_ACCESSORS")
 
 pluginManagement {
@@ -32,9 +32,5 @@ plugins {
     id("org.gradle.toolchains.foojay-resolver-convention") version "1.0.0"
 }
 
-include(":app:androidApp")
-include(":app:desktopApp")
-include(":app:shared")
-include(":app:webApp")
-include(":core")
+// Único módulo activo en este repositorio: el servidor Ktor
 include(":server")
