@@ -7,7 +7,7 @@ import kotlinx.serialization.Serializable
 data class RegistroRequest(
     val nombre: String,
     val email: String,
-    val password: String
+    val contrasena: String
 )
 
 // Este objeto representa la respuesta que el Servidor le devolverá al celular

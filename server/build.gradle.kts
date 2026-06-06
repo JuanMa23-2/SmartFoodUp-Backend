@@ -1,5 +1,6 @@
 plugins {
     alias(libs.plugins.kotlinJvm)
+    alias(libs.plugins.kotlinSerialization)
     alias(libs.plugins.ktor)
 }
 
@@ -17,6 +18,8 @@ dependencies {
     // Servidor Ktor (Usando la configuración nativa de tu catálogo)
     implementation(libs.ktor.serverCore)
     implementation(libs.ktor.serverNetty)
+    implementation(libs.ktor.serverContentNegotiation)
+    implementation(libs.ktor.serializationKotlinxJson)
 
     // =======================================================
     // 🗄️ BASE DE DATOS: Exposed ORM & MySQL Driver

@@ -16,39 +16,53 @@ fun Route.authRouting() {
         // 1. ENDPOINT: POST /auth/register
         post("/register") {
             try {
+                // Recibe el JSON del celular y lo convierte automáticamente en el objeto de Kotlin
                 val request = call.receive<RegistroRequest>()
-                if (request.nombre.isBlank() || request.email.isBlank() || request.password.isBlank()) {
-                    call.respond(HttpStatusCode.BadRequest, AuthResponse(false, "Todos los campos son obligatorios"))
+
+                // Ajustado para usar 'contrasena' que es el campo mapeado desde el Frontend
+                if (request.nombre.isBlank() || request.email.isBlank() || request.contrasena.isBlank()) {
+                    call.respond(
+                        HttpStatusCode.BadRequest,
+                        AuthResponse(exitoso = false, mensaje = "Todos los campos son obligatorios")
+                    )
                     return@post
                 }
 
-                var usuarioIdGenerado: Int? = null
                 var emailYaExiste = false
 
-                // 🔑 Encriptamos la contraseña antes de entrar a la transacción de la Base de Datos
-                val passwordHasheada = BCrypt.hashpw(request.password, BCrypt.gensalt())
+                // 🔑 Encriptamos la contraseña de forma segura usando BCrypt
+                val passwordHasheada = BCrypt.hashpw(request.contrasena, BCrypt.gensalt())
 
                 transaction {
                     val existe = Usuarios.select { Usuarios.email eq request.email }.count() > 0
                     if (existe) {
                         emailYaExiste = true
                     } else {
-                        val insertStatement = Usuarios.insert {
+                        Usuarios.insert {
                             it[nombre] = request.nombre
                             it[email] = request.email
                             it[passwordHash] = passwordHasheada
                         }
-                        usuarioIdGenerado = insertStatement[Usuarios.id]
                     }
                 }
 
                 if (emailYaExiste) {
-                    call.respond(HttpStatusCode.Conflict, AuthResponse(false, "El correo electrónico ya está registrado"))
+                    call.respond(
+                        HttpStatusCode.Conflict,
+                        AuthResponse(exitoso = false, mensaje = "El correo electrónico ya está registrado")
+                    )
                 } else {
-                    call.respond(HttpStatusCode.Created, AuthResponse(true, "¡Usuario creado exitosamente!", usuarioIdGenerado))
+                    // 🚀 Respondemos con un objeto AuthResponse serializado a JSON real
+                    call.respond(
+                        HttpStatusCode.Created,
+                        AuthResponse(exitoso = true, mensaje = "¡Usuario creado exitosamente!")
+                    )
                 }
             } catch (e: Exception) {
-                call.respond(HttpStatusCode.InternalServerError, AuthResponse(false, "Error en el servidor: ${e.localizedMessage}"))
+                call.respond(
+                    HttpStatusCode.InternalServerError,
+                    AuthResponse(exitoso = false, mensaje = "Error en el servidor: ${e.localizedMessage}")
+                )
             }
         }
 
@@ -57,13 +71,15 @@ fun Route.authRouting() {
             try {
                 val request = call.receive<RegistroRequest>()
 
-                if (request.email.isBlank() || request.password.isBlank()) {
-                    call.respond(HttpStatusCode.BadRequest, AuthResponse(false, "Correo y contraseña requeridos"))
+                if (request.email.isBlank() || request.contrasena.isBlank()) {
+                    call.respond(
+                        HttpStatusCode.BadRequest,
+                        AuthResponse(exitoso = false, mensaje = "Correo y contraseña requeridos")
+                    )
                     return@post
                 }
 
                 var loginExitoso = false
-                var usuarioIdEncontrado: Int? = null
                 var mensajeRespuesta = "Usuario no encontrado"
 
                 transaction {
@@ -73,10 +89,9 @@ fun Route.authRouting() {
                     if (usuarioRow != null) {
                         val passwordEnBd = usuarioRow[Usuarios.passwordHash]
 
-                        // 🔑 Verificación segura usando BCrypt (compara el texto plano con el hash de la BD)
-                        if (BCrypt.checkpw(request.password, passwordEnBd)) {
+                        // 🔑 Verificación segura usando BCrypt
+                        if (BCrypt.checkpw(request.contrasena, passwordEnBd)) {
                             loginExitoso = true
-                            usuarioIdEncontrado = usuarioRow[Usuarios.id]
                             mensajeRespuesta = "¡Inicio de sesión exitoso!"
                         } else {
                             mensajeRespuesta = "Contraseña incorrecta"
@@ -85,13 +100,22 @@ fun Route.authRouting() {
                 }
 
                 if (loginExitoso) {
-                    call.respond(HttpStatusCode.OK, AuthResponse(true, mensajeRespuesta, usuarioIdEncontrado))
+                    call.respond(
+                        HttpStatusCode.OK,
+                        AuthResponse(exitoso = true, mensaje = mensajeRespuesta)
+                    )
                 } else {
-                    call.respond(HttpStatusCode.Unauthorized, AuthResponse(false, mensajeRespuesta))
+                    call.respond(
+                        HttpStatusCode.Unauthorized,
+                        AuthResponse(exitoso = false, mensaje = mensajeRespuesta)
+                    )
                 }
 
             } catch (e: Exception) {
-                call.respond(HttpStatusCode.InternalServerError, AuthResponse(false, "Error en el servidor: ${e.localizedMessage}"))
+                call.respond(
+                    HttpStatusCode.InternalServerError,
+                    AuthResponse(exitoso = false, mensaje = "Error en el servidor: ${e.localizedMessage}")
+                )
             }
         }
     }
