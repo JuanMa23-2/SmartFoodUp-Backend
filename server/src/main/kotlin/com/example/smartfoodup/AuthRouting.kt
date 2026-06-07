@@ -16,10 +16,8 @@ fun Route.authRouting() {
         // 1. ENDPOINT: POST /auth/register
         post("/register") {
             try {
-                // Recibe el JSON del celular y lo convierte automáticamente en el objeto de Kotlin
                 val request = call.receive<RegistroRequest>()
 
-                // Ajustado para usar 'contrasena' que es el campo mapeado desde el Frontend
                 if (request.nombre.isBlank() || request.email.isBlank() || request.contrasena.isBlank()) {
                     call.respond(
                         HttpStatusCode.BadRequest,
@@ -30,7 +28,6 @@ fun Route.authRouting() {
 
                 var emailYaExiste = false
 
-                // 🔑 Encriptamos la contraseña de forma segura usando BCrypt
                 val passwordHasheada = BCrypt.hashpw(request.contrasena, BCrypt.gensalt())
 
                 transaction {
@@ -52,10 +49,10 @@ fun Route.authRouting() {
                         AuthResponse(exitoso = false, mensaje = "El correo electrónico ya está registrado")
                     )
                 } else {
-                    // 🚀 Respondemos con un objeto AuthResponse serializado a JSON real
+                    // 🚀 Respondemos enviando de vuelta el nombre con el que se registró
                     call.respond(
                         HttpStatusCode.Created,
-                        AuthResponse(exitoso = true, mensaje = "¡Usuario creado exitosamente!")
+                        AuthResponse(exitoso = true, mensaje = "¡Usuario creado exitosamente!", nombre = request.nombre)
                     )
                 }
             } catch (e: Exception) {
@@ -80,18 +77,18 @@ fun Route.authRouting() {
                 }
 
                 var loginExitoso = false
+                var nombreEnBd: String? = null
                 var mensajeRespuesta = "Usuario no encontrado"
 
                 transaction {
-                    // Buscamos el usuario por su email
                     val usuarioRow = Usuarios.select { Usuarios.email eq request.email }.singleOrNull()
 
                     if (usuarioRow != null) {
                         val passwordEnBd = usuarioRow[Usuarios.passwordHash]
 
-                        // 🔑 Verificación segura usando BCrypt
                         if (BCrypt.checkpw(request.contrasena, passwordEnBd)) {
                             loginExitoso = true
+                            nombreEnBd = usuarioRow[Usuarios.nombre] // Extraemos el nombre real de MySQL
                             mensajeRespuesta = "¡Inicio de sesión exitoso!"
                         } else {
                             mensajeRespuesta = "Contraseña incorrecta"
@@ -102,7 +99,7 @@ fun Route.authRouting() {
                 if (loginExitoso) {
                     call.respond(
                         HttpStatusCode.OK,
-                        AuthResponse(exitoso = true, mensaje = mensajeRespuesta)
+                        AuthResponse(exitoso = true, mensaje = mensajeRespuesta, nombre = nombreEnBd)
                     )
                 } else {
                     call.respond(

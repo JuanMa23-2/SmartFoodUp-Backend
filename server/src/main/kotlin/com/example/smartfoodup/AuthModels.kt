@@ -10,10 +10,10 @@ data class RegistroRequest(
     val contrasena: String
 )
 
-// Este objeto representa la respuesta que el Servidor le devolverá al celular
+// Este objeto representa la respuesta que el Servidor le devolverá al celular con el nombre dinámico
 @Serializable
 data class AuthResponse(
     val exitoso: Boolean,
     val mensaje: String,
-    val usuarioId: Int? = null
+    val nombre: String? = null // transportar el nombre real
 )
