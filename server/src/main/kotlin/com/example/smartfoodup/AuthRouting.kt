@@ -46,19 +46,29 @@ fun Route.authRouting() {
                 if (emailYaExiste) {
                     call.respond(
                         HttpStatusCode.Conflict,
-                        AuthResponse(exitoso = false, mensaje = "El correo electrónico ya está registrado")
+                        AuthResponse(
+                            exitoso = false,
+                            mensaje = "El correo electrónico ya está registrado"
+                        )
                     )
                 } else {
                     // 🚀 Respondemos enviando de vuelta el nombre con el que se registró
                     call.respond(
                         HttpStatusCode.Created,
-                        AuthResponse(exitoso = true, mensaje = "¡Usuario creado exitosamente!", nombre = request.nombre)
+                        AuthResponse(
+                            exitoso = true,
+                            mensaje = "¡Usuario creado exitosamente!",
+                            nombre = request.nombre
+                        )
                     )
                 }
             } catch (e: Exception) {
                 call.respond(
                     HttpStatusCode.InternalServerError,
-                    AuthResponse(exitoso = false, mensaje = "Error en el servidor: ${e.localizedMessage}")
+                    AuthResponse(
+                        exitoso = false,
+                        mensaje = "Error en el servidor: ${e.localizedMessage}"
+                    )
                 )
             }
         }
@@ -68,7 +78,10 @@ fun Route.authRouting() {
             try {
                 val request = call.receive<RegistroRequest>()
 
-                if (request.email.isBlank() || request.contrasena.isBlank()) {
+                // Se limpia el correo para evitar errores si el usuario escribe espacios
+                val emailLimpio = request.email.trim()
+
+                if (emailLimpio.isBlank() || request.contrasena.isBlank()) {
                     call.respond(
                         HttpStatusCode.BadRequest,
                         AuthResponse(exitoso = false, mensaje = "Correo y contraseña requeridos")
@@ -81,14 +94,16 @@ fun Route.authRouting() {
                 var mensajeRespuesta = "Usuario no encontrado"
 
                 transaction {
-                    val usuarioRow = Usuarios.select { Usuarios.email eq request.email }.singleOrNull()
+                    val usuarioRow =
+                        Usuarios.select { Usuarios.email eq emailLimpio }.singleOrNull()
 
                     if (usuarioRow != null) {
                         val passwordEnBd = usuarioRow[Usuarios.passwordHash]
 
                         if (BCrypt.checkpw(request.contrasena, passwordEnBd)) {
                             loginExitoso = true
-                            nombreEnBd = usuarioRow[Usuarios.nombre] // Extraemos el nombre real de MySQL
+                            nombreEnBd =
+                                usuarioRow[Usuarios.nombre] // Extraemos el nombre real de MySQL
                             mensajeRespuesta = "¡Inicio de sesión exitoso!"
                         } else {
                             mensajeRespuesta = "Contraseña incorrecta"
@@ -99,7 +114,11 @@ fun Route.authRouting() {
                 if (loginExitoso) {
                     call.respond(
                         HttpStatusCode.OK,
-                        AuthResponse(exitoso = true, mensaje = mensajeRespuesta, nombre = nombreEnBd)
+                        AuthResponse(
+                            exitoso = true,
+                            mensaje = mensajeRespuesta,
+                            nombre = nombreEnBd
+                        )
                     )
                 } else {
                     call.respond(
@@ -111,7 +130,10 @@ fun Route.authRouting() {
             } catch (e: Exception) {
                 call.respond(
                     HttpStatusCode.InternalServerError,
-                    AuthResponse(exitoso = false, mensaje = "Error en el servidor: ${e.localizedMessage}")
+                    AuthResponse(
+                        exitoso = false,
+                        mensaje = "Error en el servidor: ${e.localizedMessage}"
+                    )
                 )
             }
         }
