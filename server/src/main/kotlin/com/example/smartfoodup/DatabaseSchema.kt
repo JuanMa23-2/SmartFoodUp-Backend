@@ -52,21 +52,24 @@ object DatabaseFactory {
 // DEFINICIÓN DE TABLAS RELACIONALES (EXPOSED ORM)
 // ==========================================
 
-// 1. TABLA USUARIOS
+// 1. TABLA USUARIOS (Modificada para soportar Roles)
 object Usuarios : Table("usuarios") {
     val id = integer("id").autoIncrement()
     val nombre = varchar("nombre", 100)
     val email = varchar("email", 150).uniqueIndex()
     val passwordHash = varchar("password_hash", 255)
+    // Campo añadido: Identifica si es 'CLIENTE' o 'ADMIN'. Por defecto es CLIENTE.
+    val rol = varchar("rol", 20).default("CLIENTE")
     val fechaRegistro = datetime("fecha_registro").default(LocalDateTime.now())
 
     override val primaryKey = PrimaryKey(id)
 }
 
-// 2. TABLA DISPOSITIVOS (Raspberry Pi Pico W)
+// 2. TABLA DISPOSITIVOS (Raspberry Pi Pico W - Modificada para asignación flexible)
 object Dispositivos : Table("dispositivos") {
     val id = integer("id").autoIncrement()
-    val usuarioId = integer("usuario_id").references(Usuarios.id)
+    // Modificado a .nullable(): Permite al Administrador dar de alta la Pico antes de venderla/asignarla
+    val usuarioId = integer("usuario_id").references(Usuarios.id).nullable()
     val picoMacAddress = varchar("pico_mac_address", 50).uniqueIndex()
     val nombreDispositivo = varchar("nombre_dispositivo", 100).default("Mi Pico W")
     val fechaVinculacion = datetime("fecha_vinculacion").default(LocalDateTime.now())
@@ -95,7 +98,7 @@ object AnalisisIa : Table("analisis_ia") {
     val urlFoto = varchar("url_foto", 255).nullable()
     val frutaDetectada = varchar("fruta_detectada", 100)
     val porcentajeFrescura = double("porcentaje_frescura")
-    val esSaludable = bool("es_saludable") // Corregido: 'bool' nativo de Exposed
+    val esSaludable = bool("es_saludable")
     val fechaAnalisis = datetime("fecha_analisis").default(LocalDateTime.now())
 
     override val primaryKey = PrimaryKey(id)
