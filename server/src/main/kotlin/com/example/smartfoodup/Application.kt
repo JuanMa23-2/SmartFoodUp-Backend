@@ -60,7 +60,7 @@ fun Application.configureDatabase() {
         password = dbPassword
     )
 
-    // ESTE BLOQUE BORRARÁ TODO UNA SOLA VEZ EN ESTE DEPLOY PARA METER EL ROL
+
     transaction {
         SchemaUtils.create(Usuarios, Dispositivos, MedicionesSensores, AnalisisIa, RecomendacionesConsumo)
     }

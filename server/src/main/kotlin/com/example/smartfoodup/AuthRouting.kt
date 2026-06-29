@@ -39,6 +39,7 @@ fun Route.authRouting() {
                             it[nombre] = request.nombre
                             it[email] = request.email
                             it[passwordHash] = passwordHasheada
+                            it[rol] = "CLIENTE" // Todo usuario nuevo inicia por defecto como CLIENTE
                         }
                     }
                 }
@@ -52,13 +53,13 @@ fun Route.authRouting() {
                         )
                     )
                 } else {
-                    // 🚀 Respondemos enviando de vuelta el nombre con el que se registró
                     call.respond(
                         HttpStatusCode.Created,
                         AuthResponse(
                             exitoso = true,
                             mensaje = "¡Usuario creado exitosamente!",
-                            nombre = request.nombre
+                            nombre = request.nombre,
+                            rol = "CLIENTE"
                         )
                     )
                 }
@@ -78,7 +79,6 @@ fun Route.authRouting() {
             try {
                 val request = call.receive<RegistroRequest>()
 
-                // Se limpia el correo para evitar errores si el usuario escribe espacios
                 val emailLimpio = request.email.trim()
 
                 if (emailLimpio.isBlank() || request.contrasena.isBlank()) {
@@ -91,6 +91,7 @@ fun Route.authRouting() {
 
                 var loginExitoso = false
                 var nombreEnBd: String? = null
+                var rolEnBd: String? = null
                 var mensajeRespuesta = "Usuario no encontrado"
 
                 transaction {
@@ -102,8 +103,8 @@ fun Route.authRouting() {
 
                         if (BCrypt.checkpw(request.contrasena, passwordEnBd)) {
                             loginExitoso = true
-                            nombreEnBd =
-                                usuarioRow[Usuarios.nombre] // Extraemos el nombre real de MySQL
+                            nombreEnBd = usuarioRow[Usuarios.nombre]
+                            rolEnBd = usuarioRow[Usuarios.rol] // Extraemos el rol guardado en MySQL (ADMIN o CLIENTE)
                             mensajeRespuesta = "¡Inicio de sesión exitoso!"
                         } else {
                             mensajeRespuesta = "Contraseña incorrecta"
@@ -117,7 +118,8 @@ fun Route.authRouting() {
                         AuthResponse(
                             exitoso = true,
                             mensaje = mensajeRespuesta,
-                            nombre = nombreEnBd
+                            nombre = nombreEnBd,
+                            rol = rolEnBd // Enviamos el rol de vuelta en la respuesta JSON
                         )
                     )
                 } else {
