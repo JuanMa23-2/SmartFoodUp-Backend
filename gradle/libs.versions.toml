@@ -16,6 +16,7 @@ kotlin-wrappers = "2026.5.3"
 kotlinx-coroutines = "1.11.0"
 ktor = "3.4.3"
 logback = "1.5.32"
+shadow = "9.1.0"
 material3 = "1.11.0-alpha07"
 
 [libraries]
@@ -54,3 +55,4 @@ kotlinJvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
 kotlinMultiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin" }
 kotlinSerialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
 ktor = { id = "io.ktor.plugin", version.ref = "ktor" }
+shadow = { id = "com.gradleup.shadow", version.ref = "shadow" }
