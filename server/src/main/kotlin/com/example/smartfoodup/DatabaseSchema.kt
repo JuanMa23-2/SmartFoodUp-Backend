@@ -29,12 +29,21 @@ object DatabaseFactory {
         )
 
         // 4. Bloque de transacción segura que crea las tablas automáticamente si no existen
-        transaction {
+        /*transaction {
             SchemaUtils.create(
                 Usuarios,
                 Dispositivos,
                 MedicionesSensores,
                 AnalisisIa,
+                RecomendacionesConsumo
+            )
+        }*/
+        transaction {
+            SchemaUtils.drop(
+                MedicionesSensores,
+                AnalisisIa,
+                Dispositivos,
+                Usuarios,
                 RecomendacionesConsumo
             )
         }
