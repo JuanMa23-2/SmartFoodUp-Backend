@@ -62,7 +62,6 @@ fun Application.configureDatabase() {
 
     // ESTE BLOQUE BORRARÁ TODO UNA SOLA VEZ EN ESTE DEPLOY PARA METER EL ROL
     transaction {
-        SchemaUtils.drop(Usuarios, Dispositivos, MedicionesSensores, AnalisisIa, RecomendacionesConsumo)
         SchemaUtils.create(Usuarios, Dispositivos, MedicionesSensores, AnalisisIa, RecomendacionesConsumo)
     }
 }
