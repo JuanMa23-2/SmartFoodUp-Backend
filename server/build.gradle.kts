@@ -39,8 +39,8 @@ dependencies {
 }
 
 // Forzamos a que el manifiesto apunte correctamente usando la tarea nativa de Ktor
-tasks.named<org.gradle.api.tasks.bundling.Jar>("jar") {
-    manifest {
-        attributes["Main-Class"] = "io.ktor.server.netty.EngineMain"
-    }
+tasks.named<JavaExec>("run") {
+    // Lee el puerto asignado dinámicamente por Railway o usa el 8080 por defecto
+    val port = System.getenv("PORT") ?: "8080"
+    args("--port=$port")
 }
