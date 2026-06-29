@@ -13,44 +13,43 @@ import org.jetbrains.exposed.sql.SchemaUtils
 import org.jetbrains.exposed.sql.transactions.transaction
 
 // ==========================================
-// 1. ARRANQUE DEL SERVIDOR (Puerto Dinámico)
+// 1. ARRANQUE DEL SERVIDOR (Fuerza Bruta de Puerto Dinámico)
 // ==========================================
 fun main() {
-    val port = System.getenv("PORT")?.toInt() ?: 8080
-    embeddedServer(Netty, port = port, host = "0.0.0.0", module = Application::module)
-        .start(wait = true)
-}
+    // Leemos el puerto de Railway obligatoriamente. Si localmente no existe, usa el 8080.
+    val puertoString = System.getenv("PORT") ?: "8080"
+    val puertoInt = puertoString.toInt()
 
-// ==========================================
-// 2. MÓDULO PRINCIPAL DE LA APLICACIÓN
-// ==========================================
-fun Application.module() {
-    // 🚀 CRÍTICO: Le enseñamos al servidor a procesar y responder con JSON real
-    install(ContentNegotiation) {
-        json(Json {
-            prettyPrint = true
-            isLenient = true
-        })
-    }
+    // Configuramos el servidor con inicialización directa en bloque para no perder el puerto en el JAR
+    embeddedServer(Netty, port = puertoInt, host = "0.0.0.0") {
 
-    // Inicializar y conectar la Base de Datos al arrancar
-    configureDatabase()
-
-    // Configuración de las rutas de consulta (Endpoints)
-    routing {
-        get("/") {
-            call.respondText("¡Servidor Ktor de SmartFoodUp conectado exitosamente a MySQL en la Nube!")
+        // 🚀 CRÍTICO: Configuración de serialización JSON real
+        install(ContentNegotiation) {
+            json(Json {
+                prettyPrint = true
+                isLenient = true
+            })
         }
 
-        // CONEXIÓN DEL ENDPOINT DE AUTENTICACIÓN (Registro/Login)
-        authRouting()
-    }
+        // Inicializar y conectar la Base de Datos nativamente
+        configureDatabase()
+
+        // Configuración de las rutas de consulta (Endpoints)
+        routing {
+            get("/") {
+                call.respondText("¡Servidor Ktor de SmartFoodUp conectado exitosamente a MySQL en la Nube!")
+            }
+
+            // CONEXIÓN DEL ENDPOINT DE AUTENTICACIÓN (Registro/Login)
+            authRouting()
+        }
+    }.start(wait = true)
 }
 
 // ==========================================
-// 3. CONFIGURACIÓN DE CONEXIÓN A MYSQL HÍBRIDA
+// 2. CONFIGURACIÓN DE CONEXIÓN A MYSQL HÍBRIDA
 // ==========================================
-fun Application.configureDatabase() {
+fun configureDatabase() {
     val host = System.getenv("MYSQLHOST")
     val port = System.getenv("MYSQLPORT") ?: "3306"
     val database = System.getenv("MYSQLDATABASE")
@@ -73,6 +72,7 @@ fun Application.configureDatabase() {
         password = dbPassword
     )
 
+    // Bloque directo que creará las tablas al levantar exitosamente
     transaction {
         SchemaUtils.create(Usuarios, Dispositivos, MedicionesSensores, AnalisisIa, RecomendacionesConsumo)
     }
