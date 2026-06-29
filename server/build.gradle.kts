@@ -2,15 +2,14 @@ plugins {
     alias(libs.plugins.kotlinJvm)
     alias(libs.plugins.kotlinSerialization)
     alias(libs.plugins.ktor)
-    alias(libs.plugins.shadow)
 }
 
 group = "com.example.smartfoodup"
 version = "1.0.0"
 
 application {
-    // Declaramos el punto de entrada de tu servidor Ktor
-    mainClass.set("com.example.smartfoodup.ApplicationKt")
+    // Definimos la clase principal nativa del framework
+    mainClass.set("io.ktor.server.netty.EngineMain")
 }
 
 dependencies {
@@ -39,9 +38,9 @@ dependencies {
     testImplementation(libs.kotlin.testJunit)
 }
 
-// Configuración de la tarea ShadowJar para inyectar correctamente el Manifiesto Principal
-tasks.withType<com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar> {
+// Forzamos a que el manifiesto apunte correctamente usando la tarea nativa de Ktor
+tasks.named<org.gradle.api.tasks.bundling.Jar>("jar") {
     manifest {
-        attributes["Main-Class"] = "com.example.smartfoodup.ApplicationKt"
+        attributes["Main-Class"] = "io.ktor.server.netty.EngineMain"
     }
 }
