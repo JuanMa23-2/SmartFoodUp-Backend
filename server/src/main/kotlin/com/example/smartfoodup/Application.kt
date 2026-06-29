@@ -60,7 +60,13 @@ fun Application.configureDatabase() {
         password = dbPassword
     )
 
+    Kotlin
+    // Deja el bloque final exactamente así para este despliegue:
     transaction {
+        // 1. Limpieza absoluta por única vez
+        SchemaUtils.drop(Usuarios, Dispositivos, MedicionesSensores, AnalisisIa, RecomendacionesConsumo)
+
+        // 2. Recreación limpia con la columna 'rol' integrada
         SchemaUtils.create(Usuarios, Dispositivos, MedicionesSensores, AnalisisIa, RecomendacionesConsumo)
     }
 }
