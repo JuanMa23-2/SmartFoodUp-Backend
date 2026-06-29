@@ -10,10 +10,10 @@ import org.jetbrains.exposed.sql.Database
 import org.jetbrains.exposed.sql.SchemaUtils
 import org.jetbrains.exposed.sql.transactions.transaction
 
-// 1. El arranque nativo se delega al EngineMain de Ktor configurado en el resource
+// 1. El arranque nativo se delega al EngineMain de Ktor
 fun main(args: Array<String>): Unit = io.ktor.server.netty.EngineMain.main(args)
 
-// 2. MÓDULO PRINCIPAL DE LA APLICACIÓN (Llamado automáticamente desde application.conf)
+// 2. MÓDULO PRINCIPAL DE LA APLICACIÓN
 fun Application.module() {
     install(ContentNegotiation) {
         json(Json {
@@ -60,13 +60,9 @@ fun Application.configureDatabase() {
         password = dbPassword
     )
 
-    Kotlin
-    // Deja el bloque final exactamente así para este despliegue:
+    // ESTE BLOQUE BORRARÁ TODO UNA SOLA VEZ EN ESTE DEPLOY PARA METER EL ROL
     transaction {
-        // 1. Limpieza absoluta por única vez
         SchemaUtils.drop(Usuarios, Dispositivos, MedicionesSensores, AnalisisIa, RecomendacionesConsumo)
-
-        // 2. Recreación limpia con la columna 'rol' integrada
         SchemaUtils.create(Usuarios, Dispositivos, MedicionesSensores, AnalisisIa, RecomendacionesConsumo)
     }
 }
