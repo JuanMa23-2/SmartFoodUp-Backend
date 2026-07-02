@@ -9,11 +9,21 @@ import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.transactions.transaction
 import org.jetbrains.exposed.sql.select
 import org.mindrot.jbcrypt.BCrypt
+import kotlinx.serialization.Serializable
+
+// Definición local de la petición del administrador para evitar conflictos de tipado
+@Serializable
+data class AdminRegistroRequest(
+    val nombre: String,
+    val email: String,
+    val contrasena: String,
+    val rol: String
+)
 
 fun Route.authRouting() {
     route("/auth") {
 
-        // 1. ENDPOINT: POST /auth/register
+        // 1. ENDPOINT: POST /auth/register (Público, rol CLIENTE por defecto)
         post("/register") {
             try {
                 val request = call.receive<RegistroRequest>()
@@ -27,7 +37,6 @@ fun Route.authRouting() {
                 }
 
                 var emailYaExiste = false
-
                 val passwordHasheada = BCrypt.hashpw(request.contrasena, BCrypt.gensalt())
 
                 transaction {
@@ -39,7 +48,7 @@ fun Route.authRouting() {
                             it[nombre] = request.nombre
                             it[email] = request.email
                             it[passwordHash] = passwordHasheada
-                            it[rol] = "CLIENTE" // Todo usuario nuevo inicia por defecto como CLIENTE
+                            it[rol] = "CLIENTE"
                         }
                     }
                 }
@@ -47,10 +56,7 @@ fun Route.authRouting() {
                 if (emailYaExiste) {
                     call.respond(
                         HttpStatusCode.Conflict,
-                        AuthResponse(
-                            exitoso = false,
-                            mensaje = "El correo electrónico ya está registrado"
-                        )
+                        AuthResponse(exitoso = false, mensaje = "El correo electrónico ya está registrado")
                     )
                 } else {
                     call.respond(
@@ -66,10 +72,7 @@ fun Route.authRouting() {
             } catch (e: Exception) {
                 call.respond(
                     HttpStatusCode.InternalServerError,
-                    AuthResponse(
-                        exitoso = false,
-                        mensaje = "Error en el servidor: ${e.localizedMessage}"
-                    )
+                    AuthResponse(exitoso = false, mensaje = "Error en el servidor: ${e.localizedMessage}")
                 )
             }
         }
@@ -78,7 +81,6 @@ fun Route.authRouting() {
         post("/login") {
             try {
                 val request = call.receive<RegistroRequest>()
-
                 val emailLimpio = request.email.trim()
 
                 if (emailLimpio.isBlank() || request.contrasena.isBlank()) {
@@ -95,8 +97,7 @@ fun Route.authRouting() {
                 var mensajeRespuesta = "Usuario no encontrado"
 
                 transaction {
-                    val usuarioRow =
-                        Usuarios.select { Usuarios.email eq emailLimpio }.singleOrNull()
+                    val usuarioRow = Usuarios.select { Usuarios.email eq emailLimpio }.singleOrNull()
 
                     if (usuarioRow != null) {
                         val passwordEnBd = usuarioRow[Usuarios.passwordHash]
@@ -104,7 +105,7 @@ fun Route.authRouting() {
                         if (BCrypt.checkpw(request.contrasena, passwordEnBd)) {
                             loginExitoso = true
                             nombreEnBd = usuarioRow[Usuarios.nombre]
-                            rolEnBd = usuarioRow[Usuarios.rol] // Extraemos el rol guardado en MySQL (ADMIN o CLIENTE)
+                            rolEnBd = usuarioRow[Usuarios.rol]
                             mensajeRespuesta = "¡Inicio de sesión exitoso!"
                         } else {
                             mensajeRespuesta = "Contraseña incorrecta"
@@ -119,7 +120,7 @@ fun Route.authRouting() {
                             exitoso = true,
                             mensaje = mensajeRespuesta,
                             nombre = nombreEnBd,
-                            rol = rolEnBd // Enviamos el rol de vuelta en la respuesta JSON
+                            rol = rolEnBd
                         )
                     )
                 } else {
@@ -128,14 +129,64 @@ fun Route.authRouting() {
                         AuthResponse(exitoso = false, mensaje = mensajeRespuesta)
                     )
                 }
-
             } catch (e: Exception) {
                 call.respond(
                     HttpStatusCode.InternalServerError,
-                    AuthResponse(
-                        exitoso = false,
-                        mensaje = "Error en el servidor: ${e.localizedMessage}"
+                    AuthResponse(exitoso = false, mensaje = "Error en el servidor: ${e.localizedMessage}")
+                )
+            }
+        }
+
+        // 3. ENDPOINT EXCLUSIVO: POST /auth/admin-register (El administrador decide el Rol)
+        post("/admin-register") {
+            try {
+                val request = call.receive<AdminRegistroRequest>()
+
+                if (request.nombre.isBlank() || request.email.isBlank() || request.contrasena.isBlank() || request.rol.isBlank()) {
+                    call.respond(
+                        HttpStatusCode.BadRequest,
+                        AuthResponse(exitoso = false, mensaje = "Todos los campos son obligatorios")
                     )
+                    return@post
+                }
+
+                var emailYaExiste = false
+                val passwordHasheada = BCrypt.hashpw(request.contrasena, BCrypt.gensalt())
+
+                transaction {
+                    val existe = Usuarios.select { Usuarios.email eq request.email }.count() > 0
+                    if (existe) {
+                        emailYaExiste = true
+                    } else {
+                        Usuarios.insert {
+                            it[nombre] = request.nombre
+                            it[email] = request.email
+                            it[passwordHash] = passwordHasheada
+                            it[rol] = request.rol // Guarda dinámicamente ADMIN o CLIENTE según la petición
+                        }
+                    }
+                }
+
+                if (emailYaExiste) {
+                    call.respond(
+                        HttpStatusCode.Conflict,
+                        AuthResponse(exitoso = false, mensaje = "El correo electrónico ya está registrado")
+                    )
+                } else {
+                    call.respond(
+                        HttpStatusCode.Created,
+                        AuthResponse(
+                            exitoso = true,
+                            mensaje = "¡Usuario institucional creado exitosamente!",
+                            nombre = request.nombre,
+                            rol = request.rol
+                        )
+                    )
+                }
+            } catch (e: Exception) {
+                call.respond(
+                    HttpStatusCode.InternalServerError,
+                    AuthResponse(exitoso = false, mensaje = "Error en el servidor: ${e.localizedMessage}")
                 )
             }
         }
