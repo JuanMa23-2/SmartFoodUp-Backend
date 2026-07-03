@@ -1,3 +1,33 @@
+package com.example.smartfoodup
+
+import io.ktor.serialization.kotlinx.json.*
+import io.ktor.server.application.*
+import io.ktor.server.plugins.contentnegotiation.*
+import io.ktor.server.routing.*
+import org.jetbrains.exposed.sql.Database
+import org.jetbrains.exposed.sql.SchemaUtils
+import org.jetbrains.exposed.sql.transactions.transaction
+
+fun main(args: Array<String>): Unit = io.ktor.server.netty.EngineMain.main(args)
+
+fun Application.module() {
+    configureSerialization()
+    configureDatabase()
+    configureRouting()
+}
+
+fun Application.configureSerialization() {
+    install(ContentNegotiation) {
+        json()
+    }
+}
+
+fun Application.configureRouting() {
+    routing {
+        authRouting()
+    }
+}
+
 fun Application.configureDatabase() {
     val host = System.getenv("MYSQLHOST")
     val port = System.getenv("MYSQLPORT") ?: "3306"
@@ -21,7 +51,7 @@ fun Application.configureDatabase() {
         password = dbPassword
     )
 
-    // OPERACIÓN FORZADA: Borramostodo y creamos el esquema completo de 6 tablas
+    // OPERACIÓN FORZADA: Borramos todo y creamos el esquema completo
     transaction {
         SchemaUtils.drop(Usuarios, Dispositivos, MedicionesSensores, AnalisisIa, RecomendacionesConsumo, AlimentosLocales)
         SchemaUtils.create(Usuarios, Dispositivos, MedicionesSensores, AnalisisIa, RecomendacionesConsumo, AlimentosLocales)

@@ -1,7 +1,6 @@
 package com.example.smartfoodup
 
 import io.ktor.http.*
-import io.ktor.server.application.*
 import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
@@ -74,7 +73,7 @@ fun Route.authRouting() {
         // 2. ENDPOINT: POST /auth/login
         post("/login") {
             try {
-                val request = call.receive<RegistroRequest>()
+                val request = call.receive<LoginRequest>()
                 val emailLimpio = request.email.trim()
 
                 if (emailLimpio.isBlank() || request.contrasena.isBlank()) {

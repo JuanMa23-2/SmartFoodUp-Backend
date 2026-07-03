@@ -10,6 +10,20 @@ data class RegistroRequest(
     val contrasena: String
 )
 
+@Serializable
+data class LoginRequest(
+    val email: String,
+    val contrasena: String
+)
+
+@Serializable
+data class AdminRegistroRequest(
+    val nombre: String,
+    val email: String,
+    val contrasena: String,
+    val rol: String
+)
+
 // Este objeto representa la respuesta que el Servidor le devolverá al celular con el nombre dinámico y su rol
 @Serializable
 data class AuthResponse(
