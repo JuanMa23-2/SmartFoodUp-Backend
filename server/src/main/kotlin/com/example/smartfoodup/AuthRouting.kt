@@ -1,6 +1,7 @@
 package com.example.smartfoodup
 
 import io.ktor.http.*
+import io.ktor.server.application.*
 import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
@@ -8,6 +9,10 @@ import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.transactions.transaction
 import org.jetbrains.exposed.sql.select
 import org.mindrot.jbcrypt.BCrypt
+
+// Importaciones cruciales para que Ktor reconozca las tablas de Exposed
+import com.example.smartfoodup.Usuarios
+import com.example.smartfoodup.AlimentosLocales
 
 fun Route.authRouting() {
 
@@ -208,7 +213,6 @@ fun Route.authRouting() {
                         it[nombre] = request.nombre
                         it[categoria] = request.categoria
                         it[cantidad] = request.cantidad
-                        // Se enlaza de forma segura usando la variable exacta del request
                         it[imagenBase64] = request.imagenBytesBase64
                     }
                 }
