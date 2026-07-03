@@ -9,16 +9,6 @@ import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.transactions.transaction
 import org.jetbrains.exposed.sql.select
 import org.mindrot.jbcrypt.BCrypt
-import kotlinx.serialization.Serializable
-
-// Definición local de la petición del administrador para evitar conflictos de tipado
-@Serializable
-data class AdminRegistroRequest(
-    val nombre: String,
-    val email: String,
-    val contrasena: String,
-    val rol: String
-)
 
 fun Route.authRouting() {
 
@@ -27,7 +17,7 @@ fun Route.authRouting() {
     // ==========================================
     route("/auth") {
 
-        // 1. ENDPOINT: POST /auth/register (Público, rol CLIENTE por defecto)
+        // 1. ENDPOINT: POST /auth/register
         post("/register") {
             try {
                 val request = call.receive<RegistroRequest>()
@@ -141,7 +131,7 @@ fun Route.authRouting() {
             }
         }
 
-        // 3. ENDPOINT EXCLUSIVO: POST /auth/admin-register (El administrador decide el Rol)
+        // 3. ENDPOINT EXCLUSIVO: POST /auth/admin-register
         post("/admin-register") {
             try {
                 val request = call.receive<AdminRegistroRequest>()
@@ -219,6 +209,7 @@ fun Route.authRouting() {
                         it[nombre] = request.nombre
                         it[categoria] = request.categoria
                         it[cantidad] = request.cantidad
+                        // Se enlaza de forma segura usando la variable exacta del request
                         it[imagenBase64] = request.imagenBytesBase64
                     }
                 }
