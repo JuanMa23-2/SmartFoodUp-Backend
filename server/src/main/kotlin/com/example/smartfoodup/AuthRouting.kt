@@ -21,6 +21,10 @@ data class AdminRegistroRequest(
 )
 
 fun Route.authRouting() {
+
+    // ==========================================
+    // SECCIÓN 1: RUTAS DE AUTENTICACIÓN (/auth)
+    // ==========================================
     route("/auth") {
 
         // 1. ENDPOINT: POST /auth/register (Público, rol CLIENTE por defecto)
@@ -162,7 +166,7 @@ fun Route.authRouting() {
                             it[nombre] = request.nombre
                             it[email] = request.email
                             it[passwordHash] = passwordHasheada
-                            it[rol] = request.rol // Guarda dinámicamente ADMIN o CLIENTE según la petición
+                            it[rol] = request.rol
                         }
                     }
                 }
@@ -187,6 +191,47 @@ fun Route.authRouting() {
                 call.respond(
                     HttpStatusCode.InternalServerError,
                     AuthResponse(exitoso = false, mensaje = "Error en el servidor: ${e.localizedMessage}")
+                )
+            }
+        }
+    }
+
+    // ==========================================
+    // SECCIÓN 2: INTEGRACIÓN DEL CATÁLOGO (/api)
+    // ==========================================
+    route("/api") {
+
+        // 4. ENDPOINT: POST /api/alimentos
+        post("/alimentos") {
+            try {
+                val request = call.receive<AlimentoRequest>()
+
+                if (request.nombre.isBlank() || request.categoria.isBlank() || request.cantidad < 0) {
+                    call.respond(
+                        HttpStatusCode.BadRequest,
+                        AlimentoResponse(exitoso = false, mensaje = "Datos del alimento inválidos o incompletos")
+                    )
+                    return@post
+                }
+
+                transaction {
+                    AlimentosLocales.insert {
+                        it[nombre] = request.nombre
+                        it[categoria] = request.categoria
+                        it[cantidad] = request.cantidad
+                        it[imagenBase64] = request.imagenBytesBase64
+                    }
+                }
+
+                call.respond(
+                    HttpStatusCode.Created,
+                    AlimentoResponse(exitoso = true, mensaje = "¡Alimento registrado en el catálogo exitosamente!")
+                )
+
+            } catch (e: Exception) {
+                call.respond(
+                    HttpStatusCode.InternalServerError,
+                    AlimentoResponse(exitoso = false, mensaje = "Error en el servidor: ${e.localizedMessage}")
                 )
             }
         }

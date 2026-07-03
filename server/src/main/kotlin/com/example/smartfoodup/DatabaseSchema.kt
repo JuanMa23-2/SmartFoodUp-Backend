@@ -12,15 +12,14 @@ import java.time.LocalDateTime
 // ==========================================
 object DatabaseFactory {
     fun init() {
-        // 1. Intenta leer las variables de entorno que te da Railway en la nube.
         val host = System.getenv("MYSQLHOST") ?: "localhost"
         val port = System.getenv("MYSQLPORT") ?: "3306"
         val database = System.getenv("MYSQLDATABASE") ?: "smartfoodup"
         val user = System.getenv("MYSQLUSER") ?: "root"
         val password = System.getenv("MYSQLPASSWORD") ?: ""
-        // 2. Armamos la URL de conexión JDBC de forma dinámica
+
         val url = "jdbc:mysql://$host:$port/$database?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true"
-        // 3. Inicializa el motor de Exposed con los datos calculados
+
         Database.connect(
             url = url,
             driver = "com.mysql.cj.jdbc.Driver",
@@ -28,18 +27,18 @@ object DatabaseFactory {
             password = password
         )
 
-        // 4. Bloque de transacción segura que crea las tablas automáticamente si no existen
+        // Se añade la nueva tabla al bloque de inicializacion automatica
         transaction {
             SchemaUtils.create(
                 Usuarios,
                 Dispositivos,
                 MedicionesSensores,
                 AnalisisIa,
-                RecomendacionesConsumo
+                RecomendacionesConsumo,
+                AlimentosLocales // Nueva tabla para el catalogo del administrador
             )
         }
 
-        // Mensaje de confirmación en la consola del servidor
         if (host == "localhost") {
             println("¡Exposed conectado a XAMPP local con éxito!")
         } else {
@@ -52,23 +51,19 @@ object DatabaseFactory {
 // DEFINICIÓN DE TABLAS RELACIONALES (EXPOSED ORM)
 // ==========================================
 
-// 1. TABLA USUARIOS (Modificada para soportar Roles)
 object Usuarios : Table("usuarios") {
     val id = integer("id").autoIncrement()
     val nombre = varchar("nombre", 100)
     val email = varchar("email", 150).uniqueIndex()
     val passwordHash = varchar("password_hash", 255)
-    // Campo añadido: Identifica si es 'CLIENTE' o 'ADMIN'. Por defecto es CLIENTE.
     val rol = varchar("rol", 20).default("CLIENTE")
     val fechaRegistro = datetime("fecha_registro").default(LocalDateTime.now())
 
     override val primaryKey = PrimaryKey(id)
 }
 
-// 2. TABLA DISPOSITIVOS (Raspberry Pi Pico W - Modificada para asignación flexible)
 object Dispositivos : Table("dispositivos") {
     val id = integer("id").autoIncrement()
-    // Modificado a .nullable(): Permite al Administrador dar de alta la Pico antes de venderla/asignarla
     val usuarioId = integer("usuario_id").references(Usuarios.id).nullable()
     val picoMacAddress = varchar("pico_mac_address", 50).uniqueIndex()
     val nombreDispositivo = varchar("nombre_dispositivo", 100).default("Mi Pico W")
@@ -77,7 +72,6 @@ object Dispositivos : Table("dispositivos") {
     override val primaryKey = PrimaryKey(id)
 }
 
-// 3. TABLA MEDICIONES SENSORES (Peso, Gas, Temperatura, Humedad)
 object MedicionesSensores : Table("mediciones_sensores") {
     val id = integer("id").autoIncrement()
     val dispositivoId = integer("dispositivo_id").references(Dispositivos.id)
@@ -85,13 +79,12 @@ object MedicionesSensores : Table("mediciones_sensores") {
     val gasAdc = integer("gas_adc")
     val gasPorcentaje = double("gas_porcentaje")
     val temperatura = double("temperatura")
-    val humedad = double("humedad")
+    val humidity = double("humedad")
     val fechaMedicion = datetime("fecha_medicion").default(LocalDateTime.now())
 
     override val primaryKey = PrimaryKey(id)
 }
 
-// 4. TABLA ANALISIS IA (Visión Computacional / Frescura)
 object AnalisisIa : Table("analisis_ia") {
     val id = integer("id").autoIncrement()
     val usuarioId = integer("usuario_id").references(Usuarios.id)
@@ -104,12 +97,23 @@ object AnalisisIa : Table("analisis_ia") {
     override val primaryKey = PrimaryKey(id)
 }
 
-// 5. TABLA RECOMENDACIONES CONSUMO (Tabla Maestra)
 object RecomendacionesConsumo : Table("recomendaciones_consumo") {
     val id = integer("id").autoIncrement()
-    val rangoMadurez = varchar("rango_madurez", 30) // "Óptimo", "Preventivo", "Crítico"
+    val rangoMadurez = varchar("rango_madurez", 30)
     val consejoConservacion = text("consejo_conservacion")
     val recetaSugerida = text("receta_sugerida")
+
+    override val primaryKey = PrimaryKey(id)
+}
+
+// NUEVA TABLA: Catalogo de altas de frutas y alimentos agregados por administradores
+object AlimentosLocales : Table("alimentos_locales") {
+    val id = integer("id").autoIncrement()
+    val nombre = varchar("nombre", 100)
+    val categoria = varchar("categoria", 100)
+    val cantidad = integer("cantidad")
+    val imagenBase64 = text("imagen_base64").nullable() // Almacena la cadena larga de la foto
+    val fechaCreacion = datetime("fecha_creacion").default(LocalDateTime.now())
 
     override val primaryKey = PrimaryKey(id)
 }

@@ -18,3 +18,18 @@ data class AuthResponse(
     val nombre: String? = null, // transportar el nombre real
     val rol: String? = null    //  Transporta el rol real (ADMIN / CLIENTE) desde la base de datos
 )
+
+// Nuevos modelos de transferencia de datos para el modulo de alimentos
+@Serializable
+data class AlimentoRequest(
+    val nombre: String,
+    val categoria: String,
+    val cantidad: Int,
+    val imagenBytesBase64: String? = null
+)
+
+@Serializable
+data class AlimentoResponse(
+    val exitoso: Boolean,
+    val mensaje: String
+)
