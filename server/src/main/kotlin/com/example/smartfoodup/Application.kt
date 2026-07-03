@@ -51,9 +51,8 @@ fun Application.configureDatabase() {
         password = dbPassword
     )
 
-    // OPERACIÓN FORZADA: Borramos todo y creamos el esquema completo
+
     transaction {
-        SchemaUtils.drop(Usuarios, Dispositivos, MedicionesSensores, AnalisisIa, RecomendacionesConsumo, AlimentosLocales)
         SchemaUtils.create(Usuarios, Dispositivos, MedicionesSensores, AnalisisIa, RecomendacionesConsumo, AlimentosLocales)
     }
 }
