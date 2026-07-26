@@ -123,12 +123,14 @@ object PredictionService {
         }
 
         TFloat32.tensorOf(input).use { t ->
-            // Intentamos detectar el nombre de la entrada dinámicamente
+            // CORRECCIÓN TÉCNICA: TensorFlow necesita el nombre de la Op, no del Tensor
             val signature = bundle.metaGraphDef().getSignatureDefOrThrow("serving_default")
-            val inputName = signature.getInputsMap().keys.firstOrNull() ?: "serving_default_input_1"
-            val outputName = signature.getOutputsMap().keys.firstOrNull() ?: "StatefulPartitionedCall"
             
-            println("🎯 Usando entrada detectada: $inputName")
+            // Extraemos el nombre real y quitamos el ":0" si existe
+            val inputName = signature.getInputsMap().values.first().getName().substringBefore(":")
+            val outputName = signature.getOutputsMap().values.first().getName().substringBefore(":")
+            
+            println("🎯 Runner usando Op entrada: $inputName, Op salida: $outputName")
 
             val res = bundle.session().runner()
                 .feed(inputName, t)
@@ -156,8 +158,8 @@ object PredictionService {
     }
 
     private suspend fun obtenerInfoExtraGemini(fruta: String, estado: String, saludable: Boolean, raw: String, key: String): PredictionResult {
-        // CAMBIO A GEMINI 2.0 FLASH
-        val url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=$key"
+        // USAMOS EL ALIAS 'gemini-1.5-flash' QUE ES EL MÁS COMPATIBLE EN 2026
+        val url = "https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=$key"
         val prompt = "Alimento: $fruta ($estado). Responde SOLO un JSON plano: {\"porcentaje\": 85, \"dias\": \"X dias\", \"comer\": \"recetas\"}"
         
         return try {
@@ -188,8 +190,8 @@ object PredictionService {
     }
 
     private suspend fun predecirConGeminiTotal(cleanB64: String, mime: String, key: String): PredictionResult {
-        // CAMBIO A GEMINI 2.0 FLASH
-        val url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=$key"
+        // USAMOS EL MODELO FLASH ESTABLE
+        val url = "https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=$key"
         val bodyStr = """
             {
               "contents": [{
