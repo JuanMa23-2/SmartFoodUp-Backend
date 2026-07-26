@@ -35,11 +35,12 @@ fun Application.configureRouting() {
 }
 
 fun Application.configureDatabase() {
-    val host = System.getenv("MYSQLHOST") ?: "localhost"
-    val port = System.getenv("MYSQLPORT") ?: "3306"
-    val database = System.getenv("MYSQLDATABASE") ?: "smartfoodup"
-    val user = System.getenv("MYSQLUSER") ?: "root"
-    val password = System.getenv("MYSQLPASSWORD") ?: ""
+    // Usamos .takeIf { it.isNotBlank() } para ignorar variables vacías que manda Railway
+    val host = System.getenv("MYSQLHOST")?.takeIf { it.isNotBlank() } ?: "mysql.railway.internal"
+    val port = System.getenv("MYSQLPORT")?.takeIf { it.isNotBlank() } ?: "3306"
+    val database = System.getenv("MYSQLDATABASE")?.takeIf { it.isNotBlank() } ?: "railway"
+    val user = System.getenv("MYSQLUSER")?.takeIf { it.isNotBlank() } ?: "root"
+    val password = System.getenv("MYSQLPASSWORD")?.takeIf { it.isNotBlank() } ?: ""
 
     val jdbcUrl = "jdbc:mysql://$host:$port/$database?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true"
 
