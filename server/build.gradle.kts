@@ -37,7 +37,11 @@ dependencies {
     testImplementation(libs.ktor.serverTestHost)
     testImplementation(libs.kotlin.testJunit)
     // Para hacer descargas HTTP desde Ktor (Cliente HTTP)
+    implementation("io.ktor:ktor-client-core:2.3.7")
     implementation("io.ktor:ktor-client-cio:2.3.7")
+    implementation("io.ktor:ktor-client-content-negotiation:2.3.7")
+    implementation("io.ktor:ktor-client-serialization:2.3.7")
+    implementation("io.ktor:ktor-serialization-kotlinx-json:2.3.7")
 
     // Para procesar JSON (Jackson o kotlinx.serialization)
     implementation("com.fasterxml.jackson.module:jackson-module-kotlin:2.15.2")

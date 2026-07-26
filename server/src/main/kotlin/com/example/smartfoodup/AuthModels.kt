@@ -45,5 +45,9 @@ data class AlimentoRequest(
 @Serializable
 data class AlimentoResponse(
     val exitoso: Boolean,
-    val mensaje: String
+    val mensaje: String,
+    val fruta: String? = null,
+    val estado: String? = null,
+    val porcentajeFrescura: Double? = null,
+    val sugerencias: String? = null
 )

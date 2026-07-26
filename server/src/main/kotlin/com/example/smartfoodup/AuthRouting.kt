@@ -204,17 +204,21 @@ fun Route.authRouting() {
                 if (!request.imagenBytesBase64.isNullOrBlank()) {
                     val resultadoIa = PredictionService.predecirImagen(request.imagenBytesBase64)
                     
-                    val mensajeFinal = if (resultadoIa.alimento == "Error") {
-                        "Error al procesar la imagen con IA."
+                    val mensajeFinal = if (resultadoIa.fruta == "Error") {
+                        "Error en el análisis: ${resultadoIa.estado}"
                     } else {
-                        "Resultado de la IA: Es ${resultadoIa.alimento.replace("_", " ")} en estado ${if (resultadoIa.esSaludable) "fresco/saludable" else "maduro/no saludable"}."
+                        "Análisis completado: ${resultadoIa.fruta}"
                     }
 
                     call.respond(
                         HttpStatusCode.OK,
                         AlimentoResponse(
-                            exitoso = resultadoIa.alimento != "Error",
-                            mensaje = mensajeFinal
+                            exitoso = resultadoIa.fruta != "Error",
+                            mensaje = mensajeFinal,
+                            fruta = resultadoIa.fruta,
+                            estado = resultadoIa.estado,
+                            porcentajeFrescura = resultadoIa.porcentajeFrescura,
+                            sugerencias = resultadoIa.sugerencias
                         )
                     )
                     return@post
