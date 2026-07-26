@@ -144,7 +144,7 @@ object PredictionService {
     }
 
     private suspend fun obtenerInfoExtraGemini(fruta: String, estado: String, saludable: Boolean, raw: String, key: String): PredictionResult {
-        val url = "https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=$key"
+        val url = "https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash-latest:generateContent?key=$key"
         val prompt = "Alimento: $fruta ($estado). Responde SOLO un JSON plano: {\"porcentaje\": 80, \"dias\": \"3 dias\", \"comer\": \"recetas\"}"
         
         return try {
@@ -176,7 +176,7 @@ object PredictionService {
     }
 
     private suspend fun predecirConGeminiTotal(cleanB64: String, mime: String, key: String): PredictionResult {
-        val url = "https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=$key"
+        val url = "https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash-latest:generateContent?key=$key"
         val bodyStr = """
             {
               "contents": [{
