@@ -40,19 +40,29 @@ object PredictionService {
     private var modelBundle: SavedModelBundle? = null
     
     init {
-        println("🔑 Estado de API KEY: ${if(API_KEY != "TU_API_KEY_AQUI") "Cargada (empieza por ${API_KEY.take(4)})" else "NO CARGADA"}")
+        val currentDir = File(".").absolutePath
+        println("📂 Directorio actual de ejecución: $currentDir")
+        
         try {
-            val paths = listOf("server/smartfoodup_model", "smartfoodup_model", "/app/server/smartfoodup_model")
+            // Rutas extendidas para Railway
+            val paths = listOf(
+                "server/smartfoodup_model",
+                "smartfoodup_model",
+                "/app/server/smartfoodup_model",
+                "/app/smartfoodup_model"
+            )
             for (path in paths) {
                 val modelDir = File(path)
+                println("🔍 Buscando modelo en: ${modelDir.absolutePath}")
                 if (modelDir.exists() && modelDir.isDirectory && File(modelDir, "saved_model.pb").exists()) {
                     modelBundle = SavedModelBundle.load(path, "serve")
-                    println("✅ Modelo TensorFlow cargado correctamente")
+                    println("✅ ¡ÉXITO! Modelo TensorFlow cargado desde: $path")
                     break
                 }
             }
+            if (modelBundle == null) println("⚠️ No se encontró la carpeta smartfoodup_model en ninguna ruta.")
         } catch (e: Exception) {
-            println("⚠️ Modelo local no cargado: ${e.message}")
+            println("❌ Error fatal cargando modelo: ${e.message}")
         }
     }
 
