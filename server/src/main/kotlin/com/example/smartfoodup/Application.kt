@@ -30,6 +30,7 @@ fun Application.configureSerialization() {
 fun Application.configureRouting() {
     routing {
         authRouting()
+        iaRouting() // <--- Enlace con el módulo de Inteligencia Artificial
     }
 }
 
@@ -56,8 +57,14 @@ fun Application.configureDatabase() {
         password = dbPassword
     )
 
-
     transaction {
-        SchemaUtils.create(Usuarios, Dispositivos, MedicionesSensores, AnalisisIa, RecomendacionesConsumo, AlimentosLocales)
+        SchemaUtils.create(
+            Usuarios,
+            Dispositivos,
+            MedicionesSensores,
+            AnalisisIa,
+            RecomendacionesConsumo,
+            AlimentosLocales
+        )
     }
 }
