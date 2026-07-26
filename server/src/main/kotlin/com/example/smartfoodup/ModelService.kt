@@ -1,15 +1,12 @@
 package com.example.smartfoodup
 
-package com.example.smartfoodup
-
 import io.ktor.client.*
 import io.ktor.client.engine.cio.*
 import io.ktor.client.request.*
 import io.ktor.client.statement.*
-import io.ktor.utils.io.core.*
 import java.io.File
 
-object `ModelServices.kt` {
+object ModelService {
     // ⚠️ Reemplaza con el ID público de tu modelo en Google Drive
     private const val DRIVE_FILE_ID = "1TxFYdQKSIaVomFVxlgrMUNB_QQo09T-d"
     private const val MODEL_FILENAME = "modelo_smartfoodup_36clases(1).h5"
