@@ -151,7 +151,7 @@ object PredictionService {
     }
 
     private suspend fun obtenerInfoExtraGemini(fruta: String, estado: String, saludable: Boolean, raw: String, key: String): PredictionResult {
-        val url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$key"
+        val url = "https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=$key"
         val prompt = "Alimento: $fruta ($estado). Responde SOLO un JSON plano: {\"porcentaje\": 80, \"dias\": \"3 dias\", \"comer\": \"recetas\"}"
         
         return try {
@@ -161,10 +161,12 @@ object PredictionService {
             }
             
             val responseText = response.bodyAsText()
+            println("🤖 Gemini Info Response: $responseText")
             val jsonResponse = Json.parseToJsonElement(responseText).jsonObject
             
             if (jsonResponse.containsKey("error")) {
-                return PredictionResult(fruta, estado, 75.0, "API Error: ${jsonResponse["error"]?.jsonObject?.get("message")?.jsonPrimitive?.content}", saludable, raw)
+                val msg = jsonResponse["error"]?.jsonObject?.get("message")?.jsonPrimitive?.content ?: "Error API"
+                return PredictionResult(fruta, estado, 75.0, "API Error: $msg", saludable, raw)
             }
 
             val text = jsonResponse["candidates"]?.jsonArray?.get(0)?.jsonObject
@@ -181,7 +183,7 @@ object PredictionService {
     }
 
     private suspend fun predecirConGeminiTotal(cleanB64: String, mime: String, key: String): PredictionResult {
-        val url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$key"
+        val url = "https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=$key"
         val bodyStr = """
             {
               "contents": [{
@@ -200,10 +202,12 @@ object PredictionService {
             }
             
             val responseText = response.bodyAsText()
+            println("🤖 Gemini Vision Response: $responseText")
             val jsonResponse = Json.parseToJsonElement(responseText).jsonObject
             
             if (jsonResponse.containsKey("error")) {
-                return PredictionResult("Error", "Google API Error", 0.0, jsonResponse["error"]?.jsonObject?.get("message")?.jsonPrimitive?.content ?: "Error", false)
+                val msg = jsonResponse["error"]?.jsonObject?.get("message")?.jsonPrimitive?.content ?: "Error Vision"
+                return PredictionResult("Error", "Google API Error", 0.0, msg, false)
             }
 
             val text = jsonResponse["candidates"]?.jsonArray?.get(0)?.jsonObject
