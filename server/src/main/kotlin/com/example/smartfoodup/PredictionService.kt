@@ -159,14 +159,21 @@ object PredictionService {
                 setBody(mapOf("contents" to listOf(mapOf("parts" to listOf(mapOf("text" to prompt))))))
             }.body()
             
-            val text = Json.parseToJsonElement(response).jsonObject["candidates"]?.jsonArray?.get(0)?.jsonObject
+            val jsonResponse = Json.parseToJsonElement(response).jsonObject
+            if (jsonResponse.containsKey("error")) {
+                return PredictionResult(fruta, estado, 75.0, "API Error: ${jsonResponse["error"]?.jsonObject?.get("message")?.jsonPrimitive?.content}", saludable, raw)
+            }
+
+            val text = jsonResponse["candidates"]?.jsonArray?.get(0)?.jsonObject
                 ?.get("content")?.jsonObject?.get("parts")?.jsonArray?.get(0)?.jsonObject?.get("text")?.jsonPrimitive?.content ?: ""
-            val json = Json.parseToJsonElement(text.trim().removeSurrounding("```json", "```").trim()).jsonObject
+            
+            val cleanJsonStr = text.trim().removePrefix("```json").removeSuffix("```").trim()
+            val json = Json.parseToJsonElement(cleanJsonStr).jsonObject
             
             PredictionResult(fruta, if (saludable) "Fresco/Saludable" else "Podrido", json["porcentaje"]?.jsonPrimitive?.doubleOrNull ?: 80.0,
                 "Vida útil: ${json["dias"]?.jsonPrimitive?.content}. Sugerencias: ${json["comer"]?.jsonPrimitive?.content}", saludable, raw)
         } catch (e: Exception) {
-            PredictionResult(fruta, estado, 75.0, "Consumir pronto.", saludable, raw)
+            PredictionResult(fruta, estado, 75.0, "Detalle error: ${e.message}", saludable, raw)
         }
     }
 
@@ -177,22 +184,47 @@ object PredictionService {
             val response: String = client.post(url) {
                 contentType(ContentType.Application.Json)
                 setBody(mapOf("contents" to listOf(mapOf("parts" to listOf(
-                    mapOf("text" to "Analiza la imagen y devuelve JSON plano con: 'fruta', 'estado', 'porcentaje', 'dias', 'comer'."),
+                    mapOf("text" to "Analiza la imagen y devuelve JSON plano con: 'fruta' (español), 'estado' (Fresco/Podrido), 'porcentaje' (0-100), 'dias', 'comer'."),
                     mapOf("inline_data" to mapOf("mime_type" to mime, "data" to cleanB64))
                 )))))
             }.body()
             
-            val text = Json.parseToJsonElement(response).jsonObject["candidates"]?.jsonArray?.get(0)?.jsonObject
+            println("🤖 Gemini Response: $response")
+            
+            val jsonResponse = Json.parseToJsonElement(response).jsonObject
+            
+            // Si Google devuelve un error en el JSON
+            if (jsonResponse.containsKey("error")) {
+                val errorMsg = jsonResponse["error"]?.jsonObject?.get("message")?.jsonPrimitive?.content ?: "Error de Google"
+                return PredictionResult("Error", "Google API Error", 0.0, errorMsg, false)
+            }
+
+            val text = jsonResponse["candidates"]?.jsonArray?.get(0)?.jsonObject
                 ?.get("content")?.jsonObject?.get("parts")?.jsonArray?.get(0)?.jsonObject?.get("text")?.jsonPrimitive?.content ?: ""
-            val json = Json.parseToJsonElement(text.trim().removeSurrounding("```json", "```").trim()).jsonObject
+            
+            // Limpieza de JSON de Markdown
+            val cleanJsonStr = text.trim()
+                .removePrefix("```json")
+                .removeSuffix("```")
+                .trim()
+            
+            val json = Json.parseToJsonElement(cleanJsonStr).jsonObject
             
             val clase = json["fruta"]?.jsonPrimitive?.content ?: "Desconocido"
             val esSaludable = !(json["estado"]?.jsonPrimitive?.content?.contains("Podrido", true) ?: false)
             
-            PredictionResult(clase, json["estado"]?.jsonPrimitive?.content ?: "Detectado", json["porcentaje"]?.jsonPrimitive?.doubleOrNull ?: 80.0,
-                "Vida útil: ${json["dias"]?.jsonPrimitive?.content}. Sugerencia: ${json["comer"]?.jsonPrimitive?.content}", esSaludable, "IA_DETECTION")
+            PredictionResult(
+                fruta = clase,
+                estado = json["estado"]?.jsonPrimitive?.content ?: "Detectado",
+                porcentajeFrescura = json["porcentaje"]?.jsonPrimitive?.doubleOrNull ?: 80.0,
+                sugerencias = "Vida útil: ${json["dias"]?.jsonPrimitive?.content}. Sugerencia: ${json["comer"]?.jsonPrimitive?.content}",
+                esSaludable = esSaludable,
+                claseDetectada = "IA_DETECTION"
+            )
         } catch (e: Exception) {
-            PredictionResult("Error", "Error IA", 0.0, "Reintenta el análisis.", false)
+            println("❌ Error en predecirConGeminiTotal: ${e.message}")
+            e.printStackTrace()
+            PredictionResult("Error", "Error IA", 0.0, "Detalle: ${e.localizedMessage ?: "Fallo al procesar"}. Verifica el tamaño de imagen o la clave.", false)
         }
     }
 }
