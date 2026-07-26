@@ -7,7 +7,7 @@ import io.ktor.client.statement.*
 import java.io.File
 
 object ModelService {
-    // ⚠️ Reemplaza con el ID público de tu modelo en Google Drive
+    //ID público de tu modelo en Google Drive
     private const val DRIVE_FILE_ID = "1TxFYdQKSIaVomFVxlgrMUNB_QQo09T-d"
     private const val MODEL_FILENAME = "modelo_smartfoodup_36clases(1).h5"
 

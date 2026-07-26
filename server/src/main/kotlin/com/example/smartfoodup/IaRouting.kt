@@ -16,7 +16,8 @@ data class IaPredictionResponse(
     val alimento: String? = null,
     val claseDetectada: String? = null,
     val esSaludable: Boolean? = null,
-    val sugerencia: String? = null
+    val sugerencia: String? = null,
+    val porcentajeFrescura: Double? = null
 )
 
 fun Route.iaRouting() {
@@ -32,13 +33,12 @@ fun Route.iaRouting() {
                 multipart.forEachPart { part ->
                     if (part is PartData.FileItem) {
                         // Leemos la imagen subida en bytes
-                        val imageBytes = part.streamProvider().readBytes()
+                        // val imageBytes = part.streamProvider().readBytes()
 
-                        // TODO: Aquí se conecta el modelo descargado de Drive
-                        // Por ejemplo, simulamos que el modelo retorna el índice 2 (ej. Banana__Healthy)
-                        val predictedIndex = 2
+                        // Simulamos que el modelo retorna un índice para mantener tu flujo
+                        val predictedIndex = (0..35).random()
 
-                        // Usamos el servicio que creaste en el Paso 3 para traducir el índice con clases.json
+                        // Usamos el servicio para traducir y obtener sugerencias de Gemini
                         resultadoPrediccion = PredictionService.mapearPrediccion(predictedIndex)
                     }
                     part.dispose()
@@ -50,10 +50,11 @@ fun Route.iaRouting() {
                         IaPredictionResponse(
                             exitoso = true,
                             mensaje = "Predicción realizada con éxito",
-                            alimento = resultadoPrediccion!!.alimento,
+                            alimento = resultadoPrediccion!!.fruta,
                             claseDetectada = resultadoPrediccion!!.claseDetectada,
                             esSaludable = resultadoPrediccion!!.esSaludable,
-                            sugerencia = resultadoPrediccion!!.sugerencia
+                            sugerencia = resultadoPrediccion!!.sugerencias,
+                            porcentajeFrescura = resultadoPrediccion!!.porcentajeFrescura
                         )
                     )
                 } else {
@@ -71,7 +72,7 @@ fun Route.iaRouting() {
                     HttpStatusCode.InternalServerError,
                     IaPredictionResponse(
                         exitoso = false,
-                        mensaje = "Error al procesar la imagen con el modelo: ${e.localizedMessage}"
+                        mensaje = "Error al procesar la imagen: ${e.localizedMessage}"
                     )
                 )
             }
