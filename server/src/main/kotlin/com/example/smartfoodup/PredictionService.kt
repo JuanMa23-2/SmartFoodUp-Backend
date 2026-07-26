@@ -5,6 +5,7 @@ import io.ktor.client.call.*
 import io.ktor.client.engine.cio.*
 import io.ktor.client.plugins.contentnegotiation.*
 import io.ktor.client.request.*
+import io.ktor.client.statement.*
 import io.ktor.http.*
 import io.ktor.serialization.kotlinx.json.*
 import kotlinx.serialization.Serializable
@@ -58,7 +59,7 @@ object PredictionService {
                 val modelDir = File(path)
                 if (modelDir.exists() && modelDir.isDirectory && File(modelDir, "saved_model.pb").exists()) {
                     modelBundle = SavedModelBundle.load(path, "serve")
-                    println("Modelo TensorFlow cargado")
+                    println("✅ Modelo TensorFlow cargado")
                     break
                 }
             }
@@ -154,12 +155,14 @@ object PredictionService {
         val prompt = "Alimento: $fruta ($estado). JSON plano: {\"porcentaje\": n, \"dias\": \"X días\", \"comer\": \"recetas\"}"
         
         return try {
-            val response: String = client.post(url) {
+            val response: HttpResponse = client.post(url) {
                 contentType(ContentType.Application.Json)
                 setBody(mapOf("contents" to listOf(mapOf("parts" to listOf(mapOf("text" to prompt))))))
-            }.body()
+            }
             
-            val jsonResponse = Json.parseToJsonElement(response).jsonObject
+            val responseText = response.bodyAsText()
+            val jsonResponse = Json.parseToJsonElement(responseText).jsonObject
+            
             if (jsonResponse.containsKey("error")) {
                 return PredictionResult(fruta, estado, 75.0, "API Error: ${jsonResponse["error"]?.jsonObject?.get("message")?.jsonPrimitive?.content}", saludable, raw)
             }
@@ -181,19 +184,17 @@ object PredictionService {
         val url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$key"
         
         return try {
-            val response: String = client.post(url) {
+            val response: HttpResponse = client.post(url) {
                 contentType(ContentType.Application.Json)
                 setBody(mapOf("contents" to listOf(mapOf("parts" to listOf(
                     mapOf("text" to "Analiza la imagen y devuelve JSON plano con: 'fruta' (español), 'estado' (Fresco/Podrido), 'porcentaje' (0-100), 'dias', 'comer'."),
                     mapOf("inline_data" to mapOf("mime_type" to mime, "data" to cleanB64))
                 )))))
-            }.body()
+            }
             
-            println("🤖 Gemini Response: $response")
+            val responseText = response.bodyAsText()
+            val jsonResponse = Json.parseToJsonElement(responseText).jsonObject
             
-            val jsonResponse = Json.parseToJsonElement(response).jsonObject
-            
-            // Si Google devuelve un error en el JSON
             if (jsonResponse.containsKey("error")) {
                 val errorMsg = jsonResponse["error"]?.jsonObject?.get("message")?.jsonPrimitive?.content ?: "Error de Google"
                 return PredictionResult("Error", "Google API Error", 0.0, errorMsg, false)
@@ -202,7 +203,6 @@ object PredictionService {
             val text = jsonResponse["candidates"]?.jsonArray?.get(0)?.jsonObject
                 ?.get("content")?.jsonObject?.get("parts")?.jsonArray?.get(0)?.jsonObject?.get("text")?.jsonPrimitive?.content ?: ""
             
-            // Limpieza de JSON de Markdown
             val cleanJsonStr = text.trim()
                 .removePrefix("```json")
                 .removeSuffix("```")
@@ -222,9 +222,7 @@ object PredictionService {
                 claseDetectada = "IA_DETECTION"
             )
         } catch (e: Exception) {
-            println("❌ Error en predecirConGeminiTotal: ${e.message}")
-            e.printStackTrace()
-            PredictionResult("Error", "Error IA", 0.0, "Detalle: ${e.localizedMessage ?: "Fallo al procesar"}. Verifica el tamaño de imagen o la clave.", false)
+            PredictionResult("Error", "Error IA", 0.0, "Detalle: ${e.localizedMessage}. Verifica el tamaño de imagen o la clave.", false)
         }
     }
 }
