@@ -43,30 +43,15 @@ fun Application.configureDatabase() {
 
     val jdbcUrl = "jdbc:mysql://$host:$port/$database?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true"
 
-    println("🚀 Intentando conectar a la base de datos en: $jdbcUrl")
+    println("🚀 Conectando a BD: $jdbcUrl")
 
     try {
-        Database.connect(
-            url = jdbcUrl,
-            driver = "com.mysql.cj.jdbc.Driver",
-            user = user,
-            password = password
-        )
-
+        Database.connect(jdbcUrl, "com.mysql.cj.jdbc.Driver", user, password)
         transaction {
-            SchemaUtils.create(
-                Usuarios,
-                Dispositivos,
-                MedicionesSensores,
-                AnalisisIa,
-                RecomendacionesConsumo,
-                AlimentosLocales
-            )
-            println("✅ Esquema de base de datos verificado/creado con éxito.")
+            SchemaUtils.create(Usuarios, Dispositivos, MedicionesSensores, AnalisisIa, RecomendacionesConsumo, AlimentosLocales)
         }
+        println("✅ Base de datos lista.")
     } catch (e: Exception) {
-        println("❌ ERROR CRÍTICO EN BASE DE DATOS: ${e.message}")
-        // No lanzamos excepción aquí para permitir que el servidor arranque 
-        // y puedas ver los logs de error en la app si falla una ruta.
+        println("❌ Error BD: ${e.message}")
     }
 }
