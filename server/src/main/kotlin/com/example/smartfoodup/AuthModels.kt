@@ -43,8 +43,9 @@ data class AlimentoRequest(
 data class AlimentoResponse(
     val exitoso: Boolean,
     val mensaje: String,
-    val alimento: String? = null,    // Cambiado de 'fruta' a 'alimento' para el Frontend
+    val alimento: String? = null,
     val estado: String? = null,
     val porcentajeFrescura: Double? = null,
-    val sugerencia: String? = null   // Cambiado a singular para el Frontend
+    val sugerencia: String? = null,
+    val recetas: String? = null // NUEVO CAMPO: Para mostrar recetas directamente en la app
 )

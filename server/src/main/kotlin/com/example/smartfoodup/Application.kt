@@ -35,28 +35,28 @@ fun Application.configureRouting() {
 }
 
 fun Application.configureDatabase() {
-    // .takeIf { it.isNotBlank() } es la clave: ignora los textos vacíos que Railway está enviando
+    // Tomamos las variables estrictamente de Railway
     val host = System.getenv("MYSQLHOST")?.takeIf { it.isNotBlank() }
-    val port = System.getenv("MYSQLPORT")?.takeIf { it.isNotBlank() } ?: "3306"
-    val database = System.getenv("MYSQLDATABASE")?.takeIf { it.isNotBlank() }
-    val user = System.getenv("MYSQLUSER")?.takeIf { it.isNotBlank() }
-    val password = System.getenv("MYSQLPASSWORD")?.takeIf { it.isNotBlank() }
+    val port = System.getenv("MYSQLPORT") ?: "3306"
+    val database = System.getenv("MYSQLDATABASE")
+    val user = System.getenv("MYSQLUSER")
+    val password = System.getenv("MYSQLPASSWORD")
 
     if (host == null || database == null) {
-        println("❌ ERROR: Las variables MYSQLHOST o MYSQLDATABASE están VACÍAS en Railway.")
-        println("Vuelve a enlazar el servicio MySQL al Servidor o escribe los valores manualmente.")
+        println("❌ ERROR CRÍTICO: No se encontraron variables de base de datos. El servidor no conectará a nada.")
         return
     }
 
     val jdbcUrl = "jdbc:mysql://$host:$port/$database?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true"
-    println("🚀 Intentando conectar a BD Real: $jdbcUrl")
+    println("🚀 Conectando a Base de Datos en: $host")
 
     try {
         Database.connect(jdbcUrl, "com.mysql.cj.jdbc.Driver", user ?: "root", password ?: "")
         transaction {
+            // Esto creará las tablas en la base de datos VACÍA que ves en Railway
             SchemaUtils.create(Usuarios, Dispositivos, MedicionesSensores, AnalisisIa, RecomendacionesConsumo, AlimentosLocales)
         }
-        println("✅ ¡CONECTADO CON ÉXITO!")
+        println("✅ Base de datos nueva configurada y lista.")
     } catch (e: Exception) {
         println("❌ Error de conexión: ${e.message}")
     }

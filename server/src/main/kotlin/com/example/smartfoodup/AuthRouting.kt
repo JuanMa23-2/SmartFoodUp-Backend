@@ -13,14 +13,9 @@ import org.mindrot.jbcrypt.BCrypt
 fun Route.authRouting() {
 
     route("/auth") {
-        
-        post("/registro") {
-            handleRegistro(call)
-        }
-        
-        post("/register") {
-            handleRegistro(call)
-        }
+        // Soporte para ambos nombres: registro y register (Arregla el Error 404 de tu captura)
+        post("/registro") { handleRegistro(call) }
+        post("/register") { handleRegistro(call) }
 
         post("/login") {
             val request = call.receive<LoginRequest>()
@@ -63,7 +58,8 @@ fun Route.authRouting() {
                             alimento = resultadoIa.fruta,
                             estado = resultadoIa.estado,
                             porcentajeFrescura = resultadoIa.porcentajeFrescura,
-                            sugerencia = resultadoIa.sugerencias
+                            sugerencia = resultadoIa.sugerencias,
+                            recetas = resultadoIa.recetas // NUEVO CAMPO
                         )
                     )
                     return@post
@@ -87,11 +83,10 @@ fun Route.authRouting() {
 
 private suspend fun handleRegistro(call: ApplicationCall) {
     val request = call.receive<RegistroRequest>()
-    
-    val result = newSuspendedTransaction {
+    val response = newSuspendedTransaction {
         val existe = Usuarios.select { Usuarios.email eq request.email }.singleOrNull()
         if (existe != null) {
-            "Existe"
+            AuthResponse(exitoso = false, mensaje = "El correo ya está registrado")
         } else {
             val passwordHasheada = BCrypt.hashpw(request.contrasena, BCrypt.gensalt())
             Usuarios.insert {
@@ -100,13 +95,8 @@ private suspend fun handleRegistro(call: ApplicationCall) {
                 it[passwordHash] = passwordHasheada
                 it[rol] = "CLIENTE"
             }
-            "Ok"
+            AuthResponse(exitoso = true, mensaje = "Usuario registrado con éxito")
         }
     }
-
-    when (result) {
-        "Existe" -> call.respond(HttpStatusCode.Conflict, AuthResponse(exitoso = false, mensaje = "El correo ya está registrado"))
-        "Ok" -> call.respond(HttpStatusCode.Created, AuthResponse(exitoso = true, mensaje = "Usuario registrado"))
-        else -> call.respond(HttpStatusCode.InternalServerError, AuthResponse(exitoso = false, mensaje = "Error desconocido"))
-    }
+    call.respond(if (response.exitoso) HttpStatusCode.Created else HttpStatusCode.Conflict, response)
 }
