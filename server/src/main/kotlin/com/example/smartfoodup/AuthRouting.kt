@@ -76,7 +76,7 @@ fun Route.authRouting() {
                         HttpStatusCode.OK,
                         AlimentoResponse(
                             exitoso = resultadoIa.fruta != "Error",
-                            mensaje = if (resultadoIa.fruta == "Error") "Error IA" else "Detección: ${resultadoIa.fruta}",
+                            mensaje = if (resultadoIa.fruta == "Error") resultadoIa.sugerencias ?: "Error IA" else "Detección: ${resultadoIa.fruta}",
                             alimento = resultadoIa.fruta,
                             estado = resultadoIa.estado,
                             porcentajeFrescura = resultadoIa.porcentajeFrescura,

@@ -77,9 +77,8 @@ object PredictionService {
     )
 
     suspend fun predecirImagen(base64: String): PredictionResult {
-        // Detectar tipo de imagen y limpiar base64
-        val mimeType = if (base64.contains("webp")) "image/webp" else "image/jpeg"
         val cleanB64 = base64.substringAfter(",").replace("\n", "").replace("\r", "").replace(" ", "")
+        val mimeType = if (base64.contains("webp")) "image/webp" else "image/jpeg"
         
         return if (modelBundle != null) {
             try {
@@ -97,7 +96,7 @@ object PredictionService {
     private fun realizarInferenciaReal(cleanB64: String): Int {
         val bundle = modelBundle ?: throw Exception("No Model")
         val imageBytes = Base64.getDecoder().decode(cleanB64)
-        val image = ImageIO.read(ByteArrayInputStream(imageBytes)) ?: throw Exception("Imagen no soportada o corrupta")
+        val image = ImageIO.read(ByteArrayInputStream(imageBytes)) ?: throw Exception("Formato de imagen no soportado")
         
         val resized = BufferedImage(224, 224, BufferedImage.TYPE_INT_RGB)
         resized.createGraphics().drawImage(image, 0, 0, 224, 224, null)
@@ -135,9 +134,9 @@ object PredictionService {
     }
 
     private suspend fun obtenerInfoExtraGemini(fruta: String, estado: String, saludable: Boolean, raw: String): PredictionResult {
-        if (API_KEY == "TU_API_KEY_AQUI") return PredictionResult(fruta, estado, 85.0, "Falta API Key", saludable, raw)
+        if (API_KEY == "TU_API_KEY_AQUI" || API_KEY.isBlank()) return PredictionResult(fruta, estado, 85.0, "API KEY no configurada en Railway", saludable, raw)
         val url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$API_KEY"
-        val prompt = "Responde SOLO JSON: {\"dias\": \"X dias\", \"recetas\": \"...\", \"porcentaje\": 85}. Alimento: $fruta ($estado)."
+        val prompt = "Responde SOLO JSON plano: {\"dias\": \"X dias\", \"recetas\": \"...\", \"porcentaje\": 85}. Alimento: $fruta ($estado)."
         
         return try {
             val response: String = client.post(url) {
@@ -150,12 +149,12 @@ object PredictionService {
             PredictionResult(fruta, estado, json["porcentaje"]?.jsonPrimitive?.doubleOrNull ?: 80.0, 
                 "Vida útil: ${json["dias"]?.jsonPrimitive?.content}. Consejos: ${json["recetas"]?.jsonPrimitive?.content}", saludable, raw)
         } catch (e: Exception) {
-            PredictionResult(fruta, estado, 70.0, "Consumir pronto.", saludable, raw)
+            PredictionResult(fruta, estado, 70.0, "Error en Gemini: ${e.localizedMessage}", saludable, raw)
         }
     }
 
     private suspend fun predecirConGeminiTotal(cleanB64: String, mime: String): PredictionResult {
-        if (API_KEY == "TU_API_KEY_AQUI") return PredictionResult("Error", "No API Key", 0.0, "Check Railway Vars", false)
+        if (API_KEY == "TU_API_KEY_AQUI" || API_KEY.isBlank()) return PredictionResult("Error", "No API Key", 0.0, "Verifica GEMINI_API_KEY en Railway", false)
         val url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$API_KEY"
         val prompt = "Analiza la imagen. Responde SOLO JSON: {\"fruta\": \"Nombre en español\", \"estado\": \"Fresco/Podrido\", \"porcentaje\": 80, \"dias\": \"X dias\", \"sugerencias\": \"...\"}"
         
@@ -175,7 +174,7 @@ object PredictionService {
             PredictionResult(clase, json["estado"]?.jsonPrimitive?.content ?: "Detectado", json["porcentaje"]?.jsonPrimitive?.doubleOrNull ?: 80.0,
                 "Vida útil: ${json["dias"]?.jsonPrimitive?.content}. Sugerencia: ${json["sugerencias"]?.jsonPrimitive?.content}", esSaludable, "IA_DETECTION")
         } catch (e: Exception) {
-            PredictionResult("Error", "Error IA", 0.0, "Reintente: ${e.message}", false)
+            PredictionResult("Error", "Error IA", 0.0, "Detalle: ${e.localizedMessage}", false)
         }
     }
 }
