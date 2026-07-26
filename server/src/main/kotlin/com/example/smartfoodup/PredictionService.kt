@@ -31,13 +31,6 @@ data class PredictionResult(
 )
 
 object PredictionService {
-    // Cliente para comunicación interna
-    private val client = HttpClient(CIO) {
-        install(ContentNegotiation) {
-            json(Json { ignoreUnknownKeys = true; isLenient = true })
-        }
-    }
-
     // Cliente específico para Gemini (sin auto-parsing para evitar errores de casting)
     private val iaClient = HttpClient(CIO)
 
