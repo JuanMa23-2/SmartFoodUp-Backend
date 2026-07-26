@@ -35,7 +35,7 @@ fun Application.configureRouting() {
 }
 
 fun Application.configureDatabase() {
-    // Usamos .takeIf { it.isNotBlank() } para ignorar variables vacías que manda Railway
+    // Railway inyecta estas variables. takeIf asegura que no usemos textos vacíos.
     val host = System.getenv("MYSQLHOST")?.takeIf { it.isNotBlank() } ?: "mysql.railway.internal"
     val port = System.getenv("MYSQLPORT")?.takeIf { it.isNotBlank() } ?: "3306"
     val database = System.getenv("MYSQLDATABASE")?.takeIf { it.isNotBlank() } ?: "railway"
@@ -44,15 +44,21 @@ fun Application.configureDatabase() {
 
     val jdbcUrl = "jdbc:mysql://$host:$port/$database?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true"
 
-    println("🚀 Conectando a BD: $jdbcUrl")
+    println("🚀 Intentando conectar a: $jdbcUrl")
 
     try {
-        Database.connect(jdbcUrl, "com.mysql.cj.jdbc.Driver", user, password)
+        Database.connect(
+            url = jdbcUrl,
+            driver = "com.mysql.cj.jdbc.Driver",
+            user = user,
+            password = password
+        )
+
         transaction {
             SchemaUtils.create(Usuarios, Dispositivos, MedicionesSensores, AnalisisIa, RecomendacionesConsumo, AlimentosLocales)
         }
-        println("✅ Base de datos lista.")
+        println("✅ Base de datos conectada con éxito.")
     } catch (e: Exception) {
-        println("❌ Error BD: ${e.message}")
+        println("❌ Error en conexión de BD: ${e.message}")
     }
 }
