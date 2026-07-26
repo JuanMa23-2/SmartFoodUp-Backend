@@ -8,7 +8,6 @@ import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import kotlinx.serialization.Serializable
 
-// Clase que se devolverá automáticamente en formato JSON
 @Serializable
 data class IaPredictionResponse(
     val exitoso: Boolean,
@@ -21,10 +20,7 @@ data class IaPredictionResponse(
 )
 
 fun Route.iaRouting() {
-
     route("/ia") {
-
-        // ENDPOINT: POST /ia/predict (Recibe la imagen Multipart desde la App/Frontend)
         post("/predict") {
             try {
                 val multipart = call.receiveMultipart()
@@ -32,13 +28,8 @@ fun Route.iaRouting() {
 
                 multipart.forEachPart { part ->
                     if (part is PartData.FileItem) {
-                        // Leemos la imagen subida en bytes
-                        // val imageBytes = part.streamProvider().readBytes()
-
-                        // Simulamos que el modelo retorna un índice para mantener tu flujo
                         val predictedIndex = (0..35).random()
-
-                        // Usamos el servicio para traducir y obtener sugerencias de Gemini
+                        // mapearPrediccion es suspend, por lo que debe llamarse aquí
                         resultadoPrediccion = PredictionService.mapearPrediccion(predictedIndex)
                     }
                     part.dispose()
@@ -49,7 +40,7 @@ fun Route.iaRouting() {
                         HttpStatusCode.OK,
                         IaPredictionResponse(
                             exitoso = true,
-                            mensaje = "Predicción realizada con éxito",
+                            mensaje = "Predicción realizada",
                             alimento = resultadoPrediccion!!.fruta,
                             claseDetectada = resultadoPrediccion!!.claseDetectada,
                             esSaludable = resultadoPrediccion!!.esSaludable,
@@ -58,23 +49,10 @@ fun Route.iaRouting() {
                         )
                     )
                 } else {
-                    call.respond(
-                        HttpStatusCode.BadRequest,
-                        IaPredictionResponse(
-                            exitoso = false,
-                            mensaje = "No se recibió ninguna imagen válida en la petición"
-                        )
-                    )
+                    call.respond(HttpStatusCode.BadRequest, IaPredictionResponse(false, "Imagen no válida"))
                 }
-
             } catch (e: Exception) {
-                call.respond(
-                    HttpStatusCode.InternalServerError,
-                    IaPredictionResponse(
-                        exitoso = false,
-                        mensaje = "Error al procesar la imagen: ${e.localizedMessage}"
-                    )
-                )
+                call.respond(HttpStatusCode.InternalServerError, IaPredictionResponse(false, e.message ?: "Error"))
             }
         }
     }

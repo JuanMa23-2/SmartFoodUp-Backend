@@ -6,229 +6,83 @@ import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import org.jetbrains.exposed.sql.insert
-import org.jetbrains.exposed.sql.transactions.transaction
 import org.jetbrains.exposed.sql.select
+import org.jetbrains.exposed.sql.transactions.transaction
 import org.mindrot.jbcrypt.BCrypt
-
-// Importaciones cruciales para que Ktor reconozca las tablas de Exposed
-import com.example.smartfoodup.Usuarios
-import com.example.smartfoodup.AlimentosLocales
 
 fun Route.authRouting() {
 
-    // ==========================================
-    // SECCIÓN 1: RUTAS DE AUTENTICACIÓN (/auth)
-    // ==========================================
     route("/auth") {
-
-        // 1. ENDPOINT: POST /auth/register
-        post("/register") {
-            try {
-                val request = call.receive<RegistroRequest>()
-
-                if (request.nombre.isBlank() || request.email.isBlank() || request.contrasena.isBlank()) {
-                    call.respond(
-                        HttpStatusCode.BadRequest,
-                        AuthResponse(exitoso = false, mensaje = "Todos los campos son obligatorios")
-                    )
-                    return@post
-                }
-
-                var emailYaExiste = false
-                val passwordHasheada = BCrypt.hashpw(request.contrasena, BCrypt.gensalt())
-
-                transaction {
-                    val existe = Usuarios.select { Usuarios.email eq request.email }.count() > 0
-                    if (existe) {
-                        emailYaExiste = true
-                    } else {
-                        Usuarios.insert {
-                            it[nombre] = request.nombre
-                            it[email] = request.email
-                            it[passwordHash] = passwordHasheada
-                            it[rol] = "CLIENTE"
-                        }
+        post("/registro") {
+            val request = call.receive<RegistroRequest>()
+            var errorMensaje: String? = null
+            
+            transaction {
+                val existe = Usuarios.select { Usuarios.email eq request.email }.singleOrNull()
+                if (existe != null) {
+                    errorMensaje = "El correo ya está registrado"
+                } else {
+                    val passwordHasheada = BCrypt.hashpw(request.contrasena, BCrypt.gensalt())
+                    Usuarios.insert {
+                        it[nombre] = request.nombre
+                        it[email] = request.email
+                        it[passwordHash] = passwordHasheada
+                        it[rol] = "CLIENTE"
                     }
                 }
+            }
 
-                if (emailYaExiste) {
-                    call.respond(
-                        HttpStatusCode.Conflict,
-                        AuthResponse(exitoso = false, mensaje = "El correo electrónico ya está registrado")
-                    )
-                } else {
-                    call.respond(
-                        HttpStatusCode.Created,
-                        AuthResponse(
-                            exitoso = true,
-                            mensaje = "¡Usuario creado exitosamente!",
-                            nombre = request.nombre,
-                            rol = "CLIENTE"
-                        )
-                    )
-                }
-            } catch (e: Exception) {
-                call.respond(
-                    HttpStatusCode.InternalServerError,
-                    AuthResponse(exitoso = false, mensaje = "Error en el servidor: ${e.localizedMessage}")
-                )
+            if (errorMensaje != null) {
+                call.respond(HttpStatusCode.Conflict, AuthResponse(exitoso = false, mensaje = errorMensaje!!))
+            } else {
+                call.respond(HttpStatusCode.Created, AuthResponse(exitoso = true, mensaje = "Usuario registrado"))
             }
         }
 
-        // 2. ENDPOINT: POST /auth/login
         post("/login") {
-            try {
-                val request = call.receive<LoginRequest>()
-                val emailLimpio = request.email.trim()
+            val request = call.receive<LoginRequest>()
+            val emailLimpio = request.email.trim()
+            var response: AuthResponse? = null
 
-                if (emailLimpio.isBlank() || request.contrasena.isBlank()) {
-                    call.respond(
-                        HttpStatusCode.BadRequest,
-                        AuthResponse(exitoso = false, mensaje = "Correo y contraseña requeridos")
-                    )
-                    return@post
-                }
-
-                var loginExitoso = false
-                var nombreEnBd: String? = null
-                var rolEnBd: String? = null
-                var mensajeRespuesta = "Usuario no encontrado"
-
-                transaction {
-                    val usuarioRow = Usuarios.select { Usuarios.email eq emailLimpio }.singleOrNull()
-
-                    if (usuarioRow != null) {
-                        val passwordEnBd = usuarioRow[Usuarios.passwordHash]
-
-                        if (BCrypt.checkpw(request.contrasena, passwordEnBd)) {
-                            loginExitoso = true
-                            nombreEnBd = usuarioRow[Usuarios.nombre]
-                            rolEnBd = usuarioRow[Usuarios.rol]
-                            mensajeRespuesta = "¡Inicio de sesión exitoso!"
-                        } else {
-                            mensajeRespuesta = "Contraseña incorrecta"
-                        }
-                    }
-                }
-
-                if (loginExitoso) {
-                    call.respond(
-                        HttpStatusCode.OK,
-                        AuthResponse(
-                            exitoso = true,
-                            mensaje = mensajeRespuesta,
-                            nombre = nombreEnBd,
-                            rol = rolEnBd
-                        )
-                    )
+            transaction {
+                val usuario = Usuarios.select { Usuarios.email eq emailLimpio }.singleOrNull()
+                if (usuario == null) {
+                    response = AuthResponse(exitoso = false, mensaje = "Usuario no encontrado")
                 } else {
-                    call.respond(
-                        HttpStatusCode.Unauthorized,
-                        AuthResponse(exitoso = false, mensaje = mensajeRespuesta)
-                    )
-                }
-            } catch (e: Exception) {
-                call.respond(
-                    HttpStatusCode.InternalServerError,
-                    AuthResponse(exitoso = false, mensaje = "Error en el servidor: ${e.localizedMessage}")
-                )
-            }
-        }
-
-        // 3. ENDPOINT EXCLUSIVO: POST /auth/admin-register
-        post("/admin-register") {
-            try {
-                val request = call.receive<AdminRegistroRequest>()
-
-                if (request.nombre.isBlank() || request.email.isBlank() || request.contrasena.isBlank() || request.rol.isBlank()) {
-                    call.respond(
-                        HttpStatusCode.BadRequest,
-                        AuthResponse(exitoso = false, mensaje = "Todos los campos son obligatorios")
-                    )
-                    return@post
-                }
-
-                var emailYaExiste = false
-                val passwordHasheada = BCrypt.hashpw(request.contrasena, BCrypt.gensalt())
-
-                transaction {
-                    val existe = Usuarios.select { Usuarios.email eq request.email }.count() > 0
-                    if (existe) {
-                        emailYaExiste = true
+                    val passwordEnBd = usuario[Usuarios.passwordHash]
+                    if (BCrypt.checkpw(request.contrasena, passwordEnBd)) {
+                        response = AuthResponse(
+                            exitoso = true,
+                            mensaje = "Bienvenido",
+                            nombre = usuario[Usuarios.nombre],
+                            rol = usuario[Usuarios.rol]
+                        )
                     } else {
-                        Usuarios.insert {
-                            it[nombre] = request.nombre
-                            it[email] = request.email
-                            it[passwordHash] = passwordHasheada
-                            it[rol] = request.rol
-                        }
+                        response = AuthResponse(exitoso = false, mensaje = "Contraseña incorrecta")
                     }
                 }
-
-                if (emailYaExiste) {
-                    call.respond(
-                        HttpStatusCode.Conflict,
-                        AuthResponse(exitoso = false, mensaje = "El correo electrónico ya está registrado")
-                    )
-                } else {
-                    call.respond(
-                        HttpStatusCode.Created,
-                        AuthResponse(
-                            exitoso = true,
-                            mensaje = "¡Usuario institucional creado exitosamente!",
-                            nombre = request.nombre,
-                            rol = request.rol
-                        )
-                    )
-                }
-            } catch (e: Exception) {
-                call.respond(
-                    HttpStatusCode.InternalServerError,
-                    AuthResponse(exitoso = false, mensaje = "Error en el servidor: ${e.localizedMessage}")
-                )
             }
+            call.respond(if (response?.exitoso == true) HttpStatusCode.OK else HttpStatusCode.Unauthorized, response!!)
         }
     }
 
-    // ==========================================
-    // SECCIÓN 2: INTEGRACIÓN DEL CATÁLOGO (/api)
-    // ==========================================
     route("/api") {
-
-        // 4. ENDPOINT: POST /api/alimentos
         post("/alimentos") {
             try {
                 val request = call.receive<AlimentoRequest>()
-
-                // Lógica de IA: Si recibimos una imagen en Base64, procesamos con la IA
+                
                 if (!request.imagenBytesBase64.isNullOrBlank()) {
                     val resultadoIa = PredictionService.predecirImagen(request.imagenBytesBase64)
-                    
-                    val mensajeFinal = if (resultadoIa.fruta == "Error") {
-                        "Error en el análisis: ${resultadoIa.estado}"
-                    } else {
-                        "Análisis completado: ${resultadoIa.fruta}"
-                    }
-
                     call.respond(
                         HttpStatusCode.OK,
                         AlimentoResponse(
                             exitoso = resultadoIa.fruta != "Error",
-                            mensaje = mensajeFinal,
-                            fruta = resultadoIa.fruta,
+                            mensaje = if (resultadoIa.fruta == "Error") "Error IA" else "Detección: ${resultadoIa.fruta}",
+                            alimento = resultadoIa.fruta,
                             estado = resultadoIa.estado,
                             porcentajeFrescura = resultadoIa.porcentajeFrescura,
-                            sugerencias = resultadoIa.sugerencias
+                            sugerencia = resultadoIa.sugerencias
                         )
-                    )
-                    return@post
-                }
-
-                // Lógica de Catálogo: Si no hay imagen IA, es un registro manual del admin
-                if (request.nombre.isBlank() || request.categoria.isBlank() || request.cantidad < 0) {
-                    call.respond(
-                        HttpStatusCode.BadRequest,
-                        AlimentoResponse(exitoso = false, mensaje = "Datos del alimento inválidos o incompletos")
                     )
                     return@post
                 }
@@ -241,17 +95,9 @@ fun Route.authRouting() {
                         it[imagenBase64] = request.imagenBytesBase64
                     }
                 }
-
-                call.respond(
-                    HttpStatusCode.Created,
-                    AlimentoResponse(exitoso = true, mensaje = "¡Alimento registrado en el catálogo exitosamente!")
-                )
-
+                call.respond(HttpStatusCode.Created, AlimentoResponse(exitoso = true, mensaje = "Registrado"))
             } catch (e: Exception) {
-                call.respond(
-                    HttpStatusCode.InternalServerError,
-                    AlimentoResponse(exitoso = false, mensaje = "Error en el servidor: ${e.localizedMessage}")
-                )
+                call.respond(HttpStatusCode.InternalServerError, AlimentoResponse(exitoso = false, mensaje = e.message ?: "Error"))
             }
         }
     }
