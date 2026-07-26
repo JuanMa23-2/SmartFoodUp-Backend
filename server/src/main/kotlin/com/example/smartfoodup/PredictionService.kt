@@ -31,23 +31,24 @@ data class PredictionResult(
 )
 
 object PredictionService {
+    // Cliente para comunicación interna
     private val client = HttpClient(CIO) {
         install(ContentNegotiation) {
             json(Json { ignoreUnknownKeys = true; isLenient = true })
         }
     }
 
-    // Función crítica: Intenta obtener la clave de todas las formas posibles
+    // Cliente específico para Gemini (sin auto-parsing para evitar errores de casting)
+    private val iaClient = HttpClient(CIO)
+
     fun findApiKey(): String {
         val envKey = System.getenv("GEMINI_API_KEY")
         val propKey = System.getProperty("GEMINI_API_KEY")
-        
-        val key = when {
+        return when {
             !envKey.isNullOrBlank() && envKey.length > 20 -> envKey.trim()
             !propKey.isNullOrBlank() && propKey.length > 20 -> propKey.trim()
             else -> "FALTA_KEY"
         }
-        return key
     }
 
     private var modelBundle: SavedModelBundle? = null
@@ -91,9 +92,8 @@ object PredictionService {
 
     suspend fun predecirImagen(base64: String): PredictionResult {
         val apiKey = findApiKey()
-        
         if (apiKey == "FALTA_KEY") {
-            return PredictionResult("Error", "Falta Configuración", 0.0, "La variable GEMINI_API_KEY no se detectó. Por favor, usa el 'Raw Editor' en Railway para guardarla.", false)
+            return PredictionResult("Error", "Falta Configuración", 0.0, "GEMINI_API_KEY no detectada en Railway.", false)
         }
 
         val cleanB64 = base64.substringAfter(",").replace("\n", "").replace("\r", "").replace(" ", "")
@@ -152,12 +152,12 @@ object PredictionService {
 
     private suspend fun obtenerInfoExtraGemini(fruta: String, estado: String, saludable: Boolean, raw: String, key: String): PredictionResult {
         val url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$key"
-        val prompt = "Alimento: $fruta ($estado). JSON plano: {\"porcentaje\": n, \"dias\": \"X días\", \"comer\": \"recetas\"}"
+        val prompt = "Alimento: $fruta ($estado). Responde SOLO un JSON plano: {\"porcentaje\": 80, \"dias\": \"3 dias\", \"comer\": \"recetas\"}"
         
         return try {
-            val response: HttpResponse = client.post(url) {
+            val response: HttpResponse = iaClient.post(url) {
                 contentType(ContentType.Application.Json)
-                setBody(mapOf("contents" to listOf(mapOf("parts" to listOf(mapOf("text" to prompt))))))
+                setBody("""{"contents":[{"parts":[{"text":"$prompt"}]}]}""")
             }
             
             val responseText = response.bodyAsText()
@@ -182,47 +182,46 @@ object PredictionService {
 
     private suspend fun predecirConGeminiTotal(cleanB64: String, mime: String, key: String): PredictionResult {
         val url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$key"
-        
+        val bodyStr = """
+            {
+              "contents": [{
+                "parts": [
+                  {"text": "Analiza la imagen y devuelve JSON plano con: 'fruta' (español), 'estado' (Fresco/Podrido), 'porcentaje' (0-100), 'dias', 'comer'."},
+                  {"inline_data": {"mime_type": "$mime", "data": "$cleanB64"}}
+                ]
+              }]
+            }
+        """.trimIndent()
+
         return try {
-            val response: HttpResponse = client.post(url) {
+            val response: HttpResponse = iaClient.post(url) {
                 contentType(ContentType.Application.Json)
-                setBody(mapOf("contents" to listOf(mapOf("parts" to listOf(
-                    mapOf("text" to "Analiza la imagen y devuelve JSON plano con: 'fruta' (español), 'estado' (Fresco/Podrido), 'porcentaje' (0-100), 'dias', 'comer'."),
-                    mapOf("inline_data" to mapOf("mime_type" to mime, "data" to cleanB64))
-                )))))
+                setBody(bodyStr)
             }
             
             val responseText = response.bodyAsText()
             val jsonResponse = Json.parseToJsonElement(responseText).jsonObject
             
             if (jsonResponse.containsKey("error")) {
-                val errorMsg = jsonResponse["error"]?.jsonObject?.get("message")?.jsonPrimitive?.content ?: "Error de Google"
-                return PredictionResult("Error", "Google API Error", 0.0, errorMsg, false)
+                return PredictionResult("Error", "Google API Error", 0.0, jsonResponse["error"]?.jsonObject?.get("message")?.jsonPrimitive?.content ?: "Error", false)
             }
 
             val text = jsonResponse["candidates"]?.jsonArray?.get(0)?.jsonObject
                 ?.get("content")?.jsonObject?.get("parts")?.jsonArray?.get(0)?.jsonObject?.get("text")?.jsonPrimitive?.content ?: ""
             
-            val cleanJsonStr = text.trim()
-                .removePrefix("```json")
-                .removeSuffix("```")
-                .trim()
-            
+            val cleanJsonStr = text.trim().removePrefix("```json").removeSuffix("```").trim()
             val json = Json.parseToJsonElement(cleanJsonStr).jsonObject
             
-            val clase = json["fruta"]?.jsonPrimitive?.content ?: "Desconocido"
-            val esSaludable = !(json["estado"]?.jsonPrimitive?.content?.contains("Podrido", true) ?: false)
-            
             PredictionResult(
-                fruta = clase,
+                fruta = json["fruta"]?.jsonPrimitive?.content ?: "Desconocido",
                 estado = json["estado"]?.jsonPrimitive?.content ?: "Detectado",
                 porcentajeFrescura = json["porcentaje"]?.jsonPrimitive?.doubleOrNull ?: 80.0,
                 sugerencias = "Vida útil: ${json["dias"]?.jsonPrimitive?.content}. Sugerencia: ${json["comer"]?.jsonPrimitive?.content}",
-                esSaludable = esSaludable,
+                esSaludable = !(json["estado"]?.jsonPrimitive?.content?.contains("Podrido", true) ?: false),
                 claseDetectada = "IA_DETECTION"
             )
         } catch (e: Exception) {
-            PredictionResult("Error", "Error IA", 0.0, "Detalle: ${e.localizedMessage}. Verifica el tamaño de imagen o la clave.", false)
+            PredictionResult("Error", "Error IA", 0.0, "Detalle: ${e.localizedMessage}. Reintenta con una imagen más ligera.", false)
         }
     }
 }
