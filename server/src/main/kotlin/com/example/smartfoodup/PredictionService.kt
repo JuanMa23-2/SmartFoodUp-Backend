@@ -169,19 +169,26 @@ object PredictionService {
     }
 
     private suspend fun predecirConGeminiTotal(cleanB64: String, mime: String): PredictionResult {
-        if (API_KEY == "TU_API_KEY_AQUI") return PredictionResult("Error", "No API Key", 0.0, "Verifica GEMINI_API_KEY en Railway", false)
-        val url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$API_KEY"
+        if (API_KEY == "TU_API_KEY_AQUI" || API_KEY.isBlank()) {
+            return PredictionResult("Error", "Falta API Key", 0.0, "La variable GEMINI_API_KEY no se guardó en Railway", false)
+        }
         
-        val prompt = "Analiza la imagen. Responde SOLO JSON plano con: 'fruta' (en español), 'estado' (Fresco/Podrido), 'porcentaje' (0-100), 'dias' (vida util aprox), 'comer' (recetas/formas de comer)."
+        val url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$API_KEY"
         
         return try {
             val response: String = client.post(url) {
                 contentType(ContentType.Application.Json)
                 setBody(mapOf("contents" to listOf(mapOf("parts" to listOf(
-                    mapOf("text" to prompt),
+                    mapOf("text" to "Analiza la imagen y devuelve JSON con 'fruta', 'estado', 'porcentaje', 'dias', 'comer'."),
                     mapOf("inline_data" to mapOf("mime_type" to mime, "data" to cleanB64))
                 )))))
             }.body()
+            
+            if (response.contains("error")) {
+                val errorMsg = Json.parseToJsonElement(response).jsonObject["error"]?.jsonObject?.get("message")?.jsonPrimitive?.content ?: "Error desconocido"
+                return PredictionResult("Error", "Error Google", 0.0, "Google dice: $errorMsg", false)
+            }
+
             val text = Json.parseToJsonElement(response).jsonObject["candidates"]?.jsonArray?.get(0)?.jsonObject
                 ?.get("content")?.jsonObject?.get("parts")?.jsonArray?.get(0)?.jsonObject?.get("text")?.jsonPrimitive?.content ?: ""
             val json = Json.parseToJsonElement(text.trim().removeSurrounding("```json", "```").trim()).jsonObject
