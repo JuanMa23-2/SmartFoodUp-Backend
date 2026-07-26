@@ -136,8 +136,6 @@ object PredictionService {
                 .fetch(outputName)
                 .run()
 
-            if (res.isEmpty()) throw Exception("Inferencia vacía")
-
             res[0].use { out ->
                 val probs = out as TFloat32
                 var max = 0; var maxP = -1.0f
