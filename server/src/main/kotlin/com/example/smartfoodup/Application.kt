@@ -35,30 +35,26 @@ fun Application.configureRouting() {
 }
 
 fun Application.configureDatabase() {
-    val host = System.getenv("MYSQLHOST")?.takeIf { it.isNotBlank() } ?: "mysql.railway.internal"
-    val port = System.getenv("MYSQLPORT")?.takeIf { it.isNotBlank() } ?: "3306"
-    val database = System.getenv("MYSQLDATABASE")?.takeIf { it.isNotBlank() } ?: "railway"
-    val user = System.getenv("MYSQLUSER")?.takeIf { it.isNotBlank() } ?: "root"
-    val password = System.getenv("MYSQLPASSWORD")?.takeIf { it.isNotBlank() } ?: ""
+    val host = System.getenv("MYSQLHOST")
+    val port = System.getenv("MYSQLPORT") ?: "3306"
+    val database = System.getenv("MYSQLDATABASE")
+    val user = System.getenv("MYSQLUSER")
+    val password = System.getenv("MYSQLPASSWORD")
 
-    val jdbcUrl = "jdbc:mysql://$host:$port/$database?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true"
+    val jdbcUrl = if (host != null) {
+        "jdbc:mysql://$host:$port/$database?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true"
+    } else {
+        "jdbc:mysql://localhost:3306/smartfoodup?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true"
+    }
 
-    println("🚀 Intentando conectar a BD en: $jdbcUrl")
+    println("🚀 Conectando a: $jdbcUrl")
 
-    var connected = false
-    var attempts = 0
-    while (!connected && attempts < 3) {
-        try {
-            Database.connect(jdbcUrl, "com.mysql.cj.jdbc.Driver", user, password)
-            transaction {
-                SchemaUtils.create(Usuarios, Dispositivos, MedicionesSensores, AnalisisIa, RecomendacionesConsumo, AlimentosLocales)
-            }
-            println("✅ Base de datos conectada con éxito.")
-            connected = true
-        } catch (e: Exception) {
-            attempts++
-            println("⚠️ Intento $attempts fallido, reintentando en 2 seg... (${e.message})")
-            Thread.sleep(2000)
+    try {
+        Database.connect(jdbcUrl, "com.mysql.cj.jdbc.Driver", user ?: "root", password ?: "")
+        transaction {
+            SchemaUtils.create(Usuarios, Dispositivos, MedicionesSensores, AnalisisIa, RecomendacionesConsumo, AlimentosLocales)
         }
+    } catch (e: Exception) {
+        println("❌ Error BD: ${e.message}")
     }
 }
