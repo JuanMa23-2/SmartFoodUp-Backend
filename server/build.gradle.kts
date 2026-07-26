@@ -48,6 +48,9 @@ dependencies {
 
     // Dependencia de TensorFlow Java para cargar el modelo .h5 / .pb
     implementation("org.tensorflow:tensorflow-core-platform:0.5.0")
+
+    // Soporte para imágenes WebP (Formato de Android)
+    implementation("org.sejda.imageio:webp-imageio:0.1.6")
 }
 
 // Forzamos a que el manifiesto apunte correctamente usando la tarea nativa de Ktor
