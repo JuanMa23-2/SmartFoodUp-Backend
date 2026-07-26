@@ -40,13 +40,14 @@ object PredictionService {
     private var modelBundle: SavedModelBundle? = null
     
     init {
+        println("🔑 Estado de API KEY: ${if(API_KEY != "TU_API_KEY_AQUI") "Cargada (empieza por ${API_KEY.take(4)})" else "NO CARGADA"}")
         try {
             val paths = listOf("server/smartfoodup_model", "smartfoodup_model", "/app/server/smartfoodup_model")
             for (path in paths) {
                 val modelDir = File(path)
                 if (modelDir.exists() && modelDir.isDirectory && File(modelDir, "saved_model.pb").exists()) {
                     modelBundle = SavedModelBundle.load(path, "serve")
-                    println("✅ Modelo TensorFlow cargado exitosamente")
+                    println("✅ Modelo TensorFlow cargado correctamente")
                     break
                 }
             }
@@ -77,15 +78,14 @@ object PredictionService {
     )
 
     suspend fun predecirImagen(base64: String): PredictionResult {
-        val cleanB64 = base64.substringAfter(",").replace("\n", "").replace("\r", "").replace(" ", "")
         val mimeType = if (base64.contains("webp")) "image/webp" else "image/jpeg"
+        val cleanB64 = base64.substringAfter(",").replace("\n", "").replace("\r", "").replace(" ", "")
         
         return if (modelBundle != null) {
             try {
                 val classIndex = realizarInferenciaReal(cleanB64)
                 mapearPrediccion(classIndex)
             } catch (e: Exception) {
-                println("⚠️ Fallo inferencia local: ${e.message}. Usando Gemini.")
                 predecirConGeminiTotal(cleanB64, mimeType)
             }
         } else {
@@ -96,8 +96,7 @@ object PredictionService {
     private fun realizarInferenciaReal(cleanB64: String): Int {
         val bundle = modelBundle ?: throw Exception("No Model")
         val imageBytes = Base64.getDecoder().decode(cleanB64)
-        val image = ImageIO.read(ByteArrayInputStream(imageBytes)) ?: throw Exception("Formato de imagen no soportado")
-        
+        val image = ImageIO.read(ByteArrayInputStream(imageBytes)) ?: throw Exception("Formato inválido")
         val resized = BufferedImage(224, 224, BufferedImage.TYPE_INT_RGB)
         resized.createGraphics().drawImage(image, 0, 0, 224, 224, null)
 
@@ -134,9 +133,18 @@ object PredictionService {
     }
 
     private suspend fun obtenerInfoExtraGemini(fruta: String, estado: String, saludable: Boolean, raw: String): PredictionResult {
-        if (API_KEY == "TU_API_KEY_AQUI" || API_KEY.isBlank()) return PredictionResult(fruta, estado, 85.0, "API KEY no configurada en Railway", saludable, raw)
+        if (API_KEY == "TU_API_KEY_AQUI") return PredictionResult(fruta, estado, 85.0, "Verifica GEMINI_API_KEY en Railway", saludable, raw)
         val url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$API_KEY"
-        val prompt = "Responde SOLO JSON plano: {\"dias\": \"X dias\", \"recetas\": \"...\", \"porcentaje\": 85}. Alimento: $fruta ($estado)."
+        
+        val prompt = """
+            Alimento detectado: $fruta ($estado). 
+            Responde SOLO en formato JSON plano:
+            {
+              "porcentaje": número 0-100,
+              "dias": "cuántos días aprox aguanta",
+              "comer": "formas de comerlo o recetas sugeridas"
+            }
+        """.trimIndent()
         
         return try {
             val response: String = client.post(url) {
@@ -146,17 +154,25 @@ object PredictionService {
             val text = Json.parseToJsonElement(response).jsonObject["candidates"]?.jsonArray?.get(0)?.jsonObject
                 ?.get("content")?.jsonObject?.get("parts")?.jsonArray?.get(0)?.jsonObject?.get("text")?.jsonPrimitive?.content ?: ""
             val json = Json.parseToJsonElement(text.trim().removeSurrounding("```json", "```").trim()).jsonObject
-            PredictionResult(fruta, estado, json["porcentaje"]?.jsonPrimitive?.doubleOrNull ?: 80.0, 
-                "Vida útil: ${json["dias"]?.jsonPrimitive?.content}. Consejos: ${json["recetas"]?.jsonPrimitive?.content}", saludable, raw)
+            
+            PredictionResult(
+                fruta = fruta,
+                estado = if (saludable) "Fresco/Saludable" else "Podrido/No saludable",
+                porcentajeFrescura = json["porcentaje"]?.jsonPrimitive?.doubleOrNull ?: 80.0,
+                sugerencias = "Vida útil: ${json["dias"]?.jsonPrimitive?.content}. Sugerencias: ${json["comer"]?.jsonPrimitive?.content}",
+                esSaludable = saludable,
+                claseDetectada = raw
+            )
         } catch (e: Exception) {
-            PredictionResult(fruta, estado, 70.0, "Error en Gemini: ${e.localizedMessage}", saludable, raw)
+            PredictionResult(fruta, estado, 75.0, "Consumir pronto.", saludable, raw)
         }
     }
 
     private suspend fun predecirConGeminiTotal(cleanB64: String, mime: String): PredictionResult {
-        if (API_KEY == "TU_API_KEY_AQUI" || API_KEY.isBlank()) return PredictionResult("Error", "No API Key", 0.0, "Verifica GEMINI_API_KEY en Railway", false)
+        if (API_KEY == "TU_API_KEY_AQUI") return PredictionResult("Error", "No API Key", 0.0, "Verifica GEMINI_API_KEY en Railway", false)
         val url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$API_KEY"
-        val prompt = "Analiza la imagen. Responde SOLO JSON: {\"fruta\": \"Nombre en español\", \"estado\": \"Fresco/Podrido\", \"porcentaje\": 80, \"dias\": \"X dias\", \"sugerencias\": \"...\"}"
+        
+        val prompt = "Analiza la imagen. Responde SOLO JSON plano con: 'fruta' (en español), 'estado' (Fresco/Podrido), 'porcentaje' (0-100), 'dias' (vida util aprox), 'comer' (recetas/formas de comer)."
         
         return try {
             val response: String = client.post(url) {
@@ -169,10 +185,18 @@ object PredictionService {
             val text = Json.parseToJsonElement(response).jsonObject["candidates"]?.jsonArray?.get(0)?.jsonObject
                 ?.get("content")?.jsonObject?.get("parts")?.jsonArray?.get(0)?.jsonObject?.get("text")?.jsonPrimitive?.content ?: ""
             val json = Json.parseToJsonElement(text.trim().removeSurrounding("```json", "```").trim()).jsonObject
+            
             val clase = json["fruta"]?.jsonPrimitive?.content ?: "Desconocido"
             val esSaludable = !(json["estado"]?.jsonPrimitive?.content?.contains("Podrido", true) ?: false)
-            PredictionResult(clase, json["estado"]?.jsonPrimitive?.content ?: "Detectado", json["porcentaje"]?.jsonPrimitive?.doubleOrNull ?: 80.0,
-                "Vida útil: ${json["dias"]?.jsonPrimitive?.content}. Sugerencia: ${json["sugerencias"]?.jsonPrimitive?.content}", esSaludable, "IA_DETECTION")
+            
+            PredictionResult(
+                fruta = clase,
+                estado = json["estado"]?.jsonPrimitive?.content ?: "Detectado",
+                porcentajeFrescura = json["porcentaje"]?.jsonPrimitive?.doubleOrNull ?: 80.0,
+                sugerencias = "Vida útil: ${json["dias"]?.jsonPrimitive?.content}. Sugerencia: ${json["comer"]?.jsonPrimitive?.content}",
+                esSaludable = esSaludable,
+                claseDetectada = "IA_DETECTION"
+            )
         } catch (e: Exception) {
             PredictionResult("Error", "Error IA", 0.0, "Detalle: ${e.localizedMessage}", false)
         }
