@@ -37,7 +37,7 @@ object PredictionService {
     }
 
     // Función crítica: Intenta obtener la clave de todas las formas posibles
-    private fun findApiKey(): String {
+    fun findApiKey(): String {
         val envKey = System.getenv("GEMINI_API_KEY")
         val propKey = System.getProperty("GEMINI_API_KEY")
         
@@ -141,7 +141,7 @@ object PredictionService {
         }
     }
 
-    suspend fun mapearPrediccion(idx: Int, key: String): PredictionResult {
+    suspend fun mapearPrediccion(idx: Int, key: String = findApiKey()): PredictionResult {
         val raw = classNames.getOrElse(idx) { "Apple__Healthy" }
         val partes = raw.split("__")
         val nombre = traducciones[partes[0]] ?: partes[0]
