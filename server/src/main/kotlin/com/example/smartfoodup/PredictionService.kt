@@ -53,7 +53,7 @@ object PredictionService {
                 val modelDir = File(path)
                 if (modelDir.exists() && modelDir.isDirectory && File(modelDir, "saved_model.pb").exists()) {
                     modelBundle = SavedModelBundle.load(path, "serve")
-                    println("✅ Modelo TensorFlow cargado con éxito")
+                    println("✅ Modelo TensorFlow cargado")
                     break
                 }
             }
@@ -124,17 +124,10 @@ object PredictionService {
 
         TFloat32.tensorOf(input).use { t ->
             val signature = bundle.metaGraphDef().getSignatureDefOrThrow("serving_default")
-            
-            // Extraemos el nombre real y quitamos el ":0" si existe
             val inputName = signature.getInputsMap().values.first().getName().substringBefore(":")
             val outputName = signature.getOutputsMap().values.first().getName().substringBefore(":")
             
-            println("🎯 Runner usando Op entrada: $inputName, Op salida: $outputName")
-
-            val res = bundle.session().runner()
-                .feed(inputName, t)
-                .fetch(outputName)
-                .run()
+            val res = bundle.session().runner().feed(inputName, t).fetch(outputName).run()
 
             res[0].use { out ->
                 val probs = out as TFloat32
@@ -157,40 +150,38 @@ object PredictionService {
     }
 
     private suspend fun obtenerInfoExtraGemini(fruta: String, estado: String, saludable: Boolean, raw: String, key: String): PredictionResult {
-        // USAMOS LA VERSIÓN v1 (PRODUCCIÓN)
-        val url = "https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=$key"
-        val prompt = "Alimento: $fruta ($estado). Responde SOLO un JSON plano: {\"porcentaje\": 85, \"dias\": \"X dias\", \"comer\": \"recetas\"}"
+        // Usamos el alias 'gemini-flash-latest' que salió en tu JSON
+        val url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=$key"
+        val prompt = "Alimento: $fruta ($estado). JSON plano: {\"porcentaje\": 85, \"dias\": \"X dias\", \"comer\": \"recetas\"}"
         
         return try {
             val response: HttpResponse = iaClient.post(url) {
                 contentType(ContentType.Application.Json)
                 setBody("""{"contents":[{"parts":[{"text":"$prompt"}]}]}""")
             }
-            
             val responseText = response.bodyAsText()
             val jsonResponse = Json.parseToJsonElement(responseText).jsonObject
             
             if (jsonResponse.containsKey("error")) {
                 val msg = jsonResponse["error"]?.jsonObject?.get("message")?.jsonPrimitive?.content ?: "Error API"
-                return PredictionResult(fruta, estado, 75.0, "API Error: $msg", saludable, raw)
+                return PredictionResult(fruta, estado, 75.0, "Error: $msg", saludable, raw)
             }
 
             val text = jsonResponse["candidates"]?.jsonArray?.get(0)?.jsonObject
                 ?.get("content")?.jsonObject?.get("parts")?.jsonArray?.get(0)?.jsonObject?.get("text")?.jsonPrimitive?.content ?: ""
-            
             val cleanJsonStr = text.trim().removePrefix("```json").removeSuffix("```").trim()
             val json = Json.parseToJsonElement(cleanJsonStr).jsonObject
             
             PredictionResult(fruta, if (saludable) "Fresco/Saludable" else "Podrido", json["porcentaje"]?.jsonPrimitive?.doubleOrNull ?: 80.0,
                 "Vida útil: ${json["dias"]?.jsonPrimitive?.content}. Sugerencias: ${json["comer"]?.jsonPrimitive?.content}", saludable, raw)
         } catch (e: Exception) {
-            PredictionResult(fruta, estado, 75.0, "Detalle: ${e.message}", saludable, raw)
+            PredictionResult(fruta, estado, 75.0, "Error: ${e.message}", saludable, raw)
         }
     }
 
     private suspend fun predecirConGeminiTotal(cleanB64: String, mime: String, key: String): PredictionResult {
-        // USAMOS LA VERSIÓN v1 (PRODUCCIÓN)
-        val url = "https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=$key"
+        // Usamos el alias 'gemini-flash-latest'
+        val url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=$key"
         val bodyStr = """
             {
               "contents": [{
@@ -207,18 +198,14 @@ object PredictionService {
                 contentType(ContentType.Application.Json)
                 setBody(bodyStr)
             }
-
             val responseText = response.bodyAsText()
             val jsonResponse = Json.parseToJsonElement(responseText).jsonObject
-            
             if (jsonResponse.containsKey("error")) {
-                val msg = jsonResponse["error"]?.jsonObject?.get("message")?.jsonPrimitive?.content ?: "Error Vision"
-                return PredictionResult("Error", "API Error", 0.0, msg, false)
+                val msg = jsonResponse["error"]?.jsonObject?.get("message")?.jsonPrimitive?.content ?: "Error"
+                return PredictionResult("Error", "Error Vision", 0.0, msg, false)
             }
-
             val text = jsonResponse["candidates"]?.jsonArray?.get(0)?.jsonObject
                 ?.get("content")?.jsonObject?.get("parts")?.jsonArray?.get(0)?.jsonObject?.get("text")?.jsonPrimitive?.content ?: ""
-            
             val cleanJsonStr = text.trim().removePrefix("```json").removeSuffix("```").trim()
             val json = Json.parseToJsonElement(cleanJsonStr).jsonObject
             

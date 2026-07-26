@@ -35,26 +35,29 @@ fun Application.configureRouting() {
 }
 
 fun Application.configureDatabase() {
-    val host = System.getenv("MYSQLHOST")
-    val port = System.getenv("MYSQLPORT") ?: "3306"
-    val database = System.getenv("MYSQLDATABASE")
-    val user = System.getenv("MYSQLUSER")
-    val password = System.getenv("MYSQLPASSWORD")
+    // .takeIf { it.isNotBlank() } es la clave: ignora los textos vacíos que Railway está enviando
+    val host = System.getenv("MYSQLHOST")?.takeIf { it.isNotBlank() }
+    val port = System.getenv("MYSQLPORT")?.takeIf { it.isNotBlank() } ?: "3306"
+    val database = System.getenv("MYSQLDATABASE")?.takeIf { it.isNotBlank() }
+    val user = System.getenv("MYSQLUSER")?.takeIf { it.isNotBlank() }
+    val password = System.getenv("MYSQLPASSWORD")?.takeIf { it.isNotBlank() }
 
-    val jdbcUrl = if (host != null) {
-        "jdbc:mysql://$host:$port/$database?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true"
-    } else {
-        "jdbc:mysql://localhost:3306/smartfoodup?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true"
+    if (host == null || database == null) {
+        println("❌ ERROR: Las variables MYSQLHOST o MYSQLDATABASE están VACÍAS en Railway.")
+        println("Vuelve a enlazar el servicio MySQL al Servidor o escribe los valores manualmente.")
+        return
     }
 
-    println("🚀 Conectando a: $jdbcUrl")
+    val jdbcUrl = "jdbc:mysql://$host:$port/$database?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true"
+    println("🚀 Intentando conectar a BD Real: $jdbcUrl")
 
     try {
         Database.connect(jdbcUrl, "com.mysql.cj.jdbc.Driver", user ?: "root", password ?: "")
         transaction {
             SchemaUtils.create(Usuarios, Dispositivos, MedicionesSensores, AnalisisIa, RecomendacionesConsumo, AlimentosLocales)
         }
+        println("✅ ¡CONECTADO CON ÉXITO!")
     } catch (e: Exception) {
-        println("❌ Error BD: ${e.message}")
+        println("❌ Error de conexión: ${e.message}")
     }
 }
