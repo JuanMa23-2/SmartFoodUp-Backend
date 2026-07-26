@@ -35,7 +35,6 @@ fun Application.configureRouting() {
 }
 
 fun Application.configureDatabase() {
-    // Railway inyecta estas variables. takeIf asegura que no usemos textos vacíos.
     val host = System.getenv("MYSQLHOST")?.takeIf { it.isNotBlank() } ?: "mysql.railway.internal"
     val port = System.getenv("MYSQLPORT")?.takeIf { it.isNotBlank() } ?: "3306"
     val database = System.getenv("MYSQLDATABASE")?.takeIf { it.isNotBlank() } ?: "railway"
@@ -44,21 +43,22 @@ fun Application.configureDatabase() {
 
     val jdbcUrl = "jdbc:mysql://$host:$port/$database?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true"
 
-    println("🚀 Intentando conectar a: $jdbcUrl")
+    println("🚀 Intentando conectar a BD en: $jdbcUrl")
 
-    try {
-        Database.connect(
-            url = jdbcUrl,
-            driver = "com.mysql.cj.jdbc.Driver",
-            user = user,
-            password = password
-        )
-
-        transaction {
-            SchemaUtils.create(Usuarios, Dispositivos, MedicionesSensores, AnalisisIa, RecomendacionesConsumo, AlimentosLocales)
+    var connected = false
+    var attempts = 0
+    while (!connected && attempts < 3) {
+        try {
+            Database.connect(jdbcUrl, "com.mysql.cj.jdbc.Driver", user, password)
+            transaction {
+                SchemaUtils.create(Usuarios, Dispositivos, MedicionesSensores, AnalisisIa, RecomendacionesConsumo, AlimentosLocales)
+            }
+            println("✅ Base de datos conectada con éxito.")
+            connected = true
+        } catch (e: Exception) {
+            attempts++
+            println("⚠️ Intento $attempts fallido, reintentando en 2 seg... (${e.message})")
+            Thread.sleep(2000)
         }
-        println("✅ Base de datos conectada con éxito.")
-    } catch (e: Exception) {
-        println("❌ Error en conexión de BD: ${e.message}")
     }
 }
