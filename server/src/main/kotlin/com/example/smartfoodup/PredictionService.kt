@@ -197,7 +197,7 @@ object PredictionService {
                 contentType(ContentType.Application.Json)
                 setBody(bodyStr)
             }
-            
+
             val responseText = response.bodyAsText()
             val jsonResponse = Json.parseToJsonElement(responseText).jsonObject
             
