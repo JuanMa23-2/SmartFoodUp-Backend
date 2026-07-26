@@ -200,6 +200,27 @@ fun Route.authRouting() {
             try {
                 val request = call.receive<AlimentoRequest>()
 
+                // Lógica de IA: Si recibimos una imagen en Base64, procesamos con la IA
+                if (!request.imagenBytesBase64.isNullOrBlank()) {
+                    val resultadoIa = PredictionService.predecirImagen(request.imagenBytesBase64)
+                    
+                    val mensajeFinal = if (resultadoIa.alimento == "Error") {
+                        "Error al procesar la imagen con IA."
+                    } else {
+                        "Resultado de la IA: Es ${resultadoIa.alimento.replace("_", " ")} en estado ${if (resultadoIa.esSaludable) "fresco/saludable" else "maduro/no saludable"}."
+                    }
+
+                    call.respond(
+                        HttpStatusCode.OK,
+                        AlimentoResponse(
+                            exitoso = resultadoIa.alimento != "Error",
+                            mensaje = mensajeFinal
+                        )
+                    )
+                    return@post
+                }
+
+                // Lógica de Catálogo: Si no hay imagen IA, es un registro manual del admin
                 if (request.nombre.isBlank() || request.categoria.isBlank() || request.cantidad < 0) {
                     call.respond(
                         HttpStatusCode.BadRequest,

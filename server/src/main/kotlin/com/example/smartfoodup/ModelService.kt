@@ -12,18 +12,18 @@ import java.io.File
 object `ModelServices.kt` {
     // ⚠️ Reemplaza con el ID público de tu modelo en Google Drive
     private const val DRIVE_FILE_ID = "1TxFYdQKSIaVomFVxlgrMUNB_QQo09T-d"
-    private const val MODEL_FILENAME = "modelo_smartfoodup_36clases.h5"
+    private const val MODEL_FILENAME = "modelo_smartfoodup_36clases(1).h5"
 
     suspend fun obtenerModeloFile(): File {
         val file = File(MODEL_FILENAME)
 
         // Si el modelo ya fue descargado en el contenedor de Railway, no lo descarga de nuevo
         if (file.exists() && file.length() > 0) {
-            println("✅ Modelo cargado desde el disco local de Railway.")
+            println("Modelo cargado desde el disco local de Railway.")
             return file
         }
 
-        println("⏳ Descargando modelo desde Google Drive a Railway...")
+        println("Descargando modelo desde Google Drive a Railway...")
         val client = HttpClient(CIO)
         val downloadUrl = "https://drive.google.com/uc?export=download&id=$DRIVE_FILE_ID"
 
