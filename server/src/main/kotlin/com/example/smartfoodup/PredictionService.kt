@@ -46,6 +46,9 @@ object PredictionService {
     private var modelBundle: SavedModelBundle? = null
     
     init {
+        // Aseguramos que el motor reconozca WebP y otros formatos
+        ImageIO.scanForPlugins()
+        
         try {
             val paths = listOf("server/smartfoodup_model", "smartfoodup_model", "/app/server/smartfoodup_model")
             for (path in paths) {
@@ -96,6 +99,7 @@ object PredictionService {
                 val classIndex = realizarInferenciaReal(cleanB64)
                 mapearPrediccion(classIndex, apiKey)
             } catch (e: Exception) {
+                println("⚠️ Fallo inferencia local (${e.message}), usando Gemini...")
                 predecirConGeminiTotal(cleanB64, mimeType, apiKey)
             }
         } else {
@@ -106,7 +110,7 @@ object PredictionService {
     private fun realizarInferenciaReal(cleanB64: String): Int {
         val bundle = modelBundle ?: throw Exception("No Model")
         val imageBytes = Base64.getDecoder().decode(cleanB64)
-        val image = ImageIO.read(ByteArrayInputStream(imageBytes)) ?: throw Exception("Img Error")
+        val image = ImageIO.read(ByteArrayInputStream(imageBytes)) ?: throw Exception("Error al leer bytes de imagen")
         val resized = BufferedImage(224, 224, BufferedImage.TYPE_INT_RGB)
         resized.createGraphics().drawImage(image, 0, 0, 224, 224, null)
 
@@ -143,11 +147,10 @@ object PredictionService {
     }
 
     private suspend fun obtenerInfoExtraGemini(fruta: String, estado: String, saludable: Boolean, raw: String, key: String): PredictionResult {
-        val url = "https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=$key"
+        // Usamos v1beta que es más flexible
+        val url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$key"
         val prompt = "Alimento: $fruta ($estado). Responde SOLO un JSON plano: {\"porcentaje\": 85, \"dias\": \"X dias\", \"comer\": \"recetas\"}"
         
-        println("🛰️ Llamando a Google API v1 (Info) con clave: ${key.take(4)}...")
-
         return try {
             val response: HttpResponse = iaClient.post(url) {
                 contentType(ContentType.Application.Json)
@@ -159,7 +162,7 @@ object PredictionService {
             
             if (jsonResponse.containsKey("error")) {
                 val msg = jsonResponse["error"]?.jsonObject?.get("message")?.jsonPrimitive?.content ?: "Error API"
-                return PredictionResult(fruta, estado, 75.0, "Error Google: $msg", saludable, raw)
+                return PredictionResult(fruta, estado, 75.0, "API Error: $msg", saludable, raw)
             }
 
             val text = jsonResponse["candidates"]?.jsonArray?.get(0)?.jsonObject
@@ -176,7 +179,8 @@ object PredictionService {
     }
 
     private suspend fun predecirConGeminiTotal(cleanB64: String, mime: String, key: String): PredictionResult {
-        val url = "https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=$key"
+        // Usamos v1beta que es más flexible
+        val url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$key"
         val bodyStr = """
             {
               "contents": [{
@@ -187,8 +191,6 @@ object PredictionService {
               }]
             }
         """.trimIndent()
-
-        println("🛰️ Llamando a Google API v1 (Vision) con clave: ${key.take(4)}...")
 
         return try {
             val response: HttpResponse = iaClient.post(url) {
