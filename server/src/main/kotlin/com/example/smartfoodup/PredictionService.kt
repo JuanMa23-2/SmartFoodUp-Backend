@@ -31,15 +31,14 @@ data class PredictionResult(
 )
 
 object PredictionService {
-    // Cliente específico para Gemini (sin auto-parsing para evitar errores de casting)
     private val iaClient = HttpClient(CIO)
 
     fun findApiKey(): String {
         val envKey = System.getenv("GEMINI_API_KEY")
         val propKey = System.getProperty("GEMINI_API_KEY")
         return when {
-            !envKey.isNullOrBlank() && envKey.length > 20 -> envKey.trim()
-            !propKey.isNullOrBlank() && propKey.length > 20 -> propKey.trim()
+            !envKey.isNullOrBlank() && envKey.length > 15 -> envKey.trim()
+            !propKey.isNullOrBlank() && propKey.length > 15 -> propKey.trim()
             else -> "FALTA_KEY"
         }
     }
@@ -53,7 +52,7 @@ object PredictionService {
                 val modelDir = File(path)
                 if (modelDir.exists() && modelDir.isDirectory && File(modelDir, "saved_model.pb").exists()) {
                     modelBundle = SavedModelBundle.load(path, "serve")
-                    println("✅ Modelo TensorFlow cargado")
+                    println("✅ Modelo TensorFlow cargado con éxito")
                     break
                 }
             }
@@ -86,7 +85,7 @@ object PredictionService {
     suspend fun predecirImagen(base64: String): PredictionResult {
         val apiKey = findApiKey()
         if (apiKey == "FALTA_KEY") {
-            return PredictionResult("Error", "Falta Configuración", 0.0, "GEMINI_API_KEY no detectada en Railway.", false)
+            return PredictionResult("Error", "Falta Configuración", 0.0, "GEMINI_API_KEY no detectada.", false)
         }
 
         val cleanB64 = base64.substringAfter(",").replace("\n", "").replace("\r", "").replace(" ", "")
@@ -144,9 +143,11 @@ object PredictionService {
     }
 
     private suspend fun obtenerInfoExtraGemini(fruta: String, estado: String, saludable: Boolean, raw: String, key: String): PredictionResult {
-        val url = "https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash-latest:generateContent?key=$key"
-        val prompt = "Alimento: $fruta ($estado). Responde SOLO un JSON plano: {\"porcentaje\": 80, \"dias\": \"3 dias\", \"comer\": \"recetas\"}"
+        val url = "https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=$key"
+        val prompt = "Alimento: $fruta ($estado). Responde SOLO un JSON plano: {\"porcentaje\": 85, \"dias\": \"X dias\", \"comer\": \"recetas\"}"
         
+        println("🛰️ Llamando a Google API v1 (Info) con clave: ${key.take(4)}...")
+
         return try {
             val response: HttpResponse = iaClient.post(url) {
                 contentType(ContentType.Application.Json)
@@ -154,12 +155,11 @@ object PredictionService {
             }
             
             val responseText = response.bodyAsText()
-            println("🤖 Gemini Info Response: $responseText")
             val jsonResponse = Json.parseToJsonElement(responseText).jsonObject
             
             if (jsonResponse.containsKey("error")) {
                 val msg = jsonResponse["error"]?.jsonObject?.get("message")?.jsonPrimitive?.content ?: "Error API"
-                return PredictionResult(fruta, estado, 75.0, "API Error: $msg", saludable, raw)
+                return PredictionResult(fruta, estado, 75.0, "Error Google: $msg", saludable, raw)
             }
 
             val text = jsonResponse["candidates"]?.jsonArray?.get(0)?.jsonObject
@@ -171,12 +171,12 @@ object PredictionService {
             PredictionResult(fruta, if (saludable) "Fresco/Saludable" else "Podrido", json["porcentaje"]?.jsonPrimitive?.doubleOrNull ?: 80.0,
                 "Vida útil: ${json["dias"]?.jsonPrimitive?.content}. Sugerencias: ${json["comer"]?.jsonPrimitive?.content}", saludable, raw)
         } catch (e: Exception) {
-            PredictionResult(fruta, estado, 75.0, "Detalle error: ${e.message}", saludable, raw)
+            PredictionResult(fruta, estado, 75.0, "Detalle: ${e.message}", saludable, raw)
         }
     }
 
     private suspend fun predecirConGeminiTotal(cleanB64: String, mime: String, key: String): PredictionResult {
-        val url = "https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash-latest:generateContent?key=$key"
+        val url = "https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=$key"
         val bodyStr = """
             {
               "contents": [{
@@ -188,6 +188,8 @@ object PredictionService {
             }
         """.trimIndent()
 
+        println("🛰️ Llamando a Google API v1 (Vision) con clave: ${key.take(4)}...")
+
         return try {
             val response: HttpResponse = iaClient.post(url) {
                 contentType(ContentType.Application.Json)
@@ -195,12 +197,11 @@ object PredictionService {
             }
             
             val responseText = response.bodyAsText()
-            println("🤖 Gemini Vision Response: $responseText")
             val jsonResponse = Json.parseToJsonElement(responseText).jsonObject
             
             if (jsonResponse.containsKey("error")) {
                 val msg = jsonResponse["error"]?.jsonObject?.get("message")?.jsonPrimitive?.content ?: "Error Vision"
-                return PredictionResult("Error", "Google API Error", 0.0, msg, false)
+                return PredictionResult("Error", "API Error", 0.0, msg, false)
             }
 
             val text = jsonResponse["candidates"]?.jsonArray?.get(0)?.jsonObject
@@ -218,7 +219,7 @@ object PredictionService {
                 claseDetectada = "IA_DETECTION"
             )
         } catch (e: Exception) {
-            PredictionResult("Error", "Error IA", 0.0, "Detalle: ${e.localizedMessage}. Reintenta con una imagen más ligera.", false)
+            PredictionResult("Error", "Error IA", 0.0, "Detalle: ${e.localizedMessage}", false)
         }
     }
 }
