@@ -46,9 +46,7 @@ object PredictionService {
     private var modelBundle: SavedModelBundle? = null
     
     init {
-        // Aseguramos que el motor reconozca WebP y otros formatos
         ImageIO.scanForPlugins()
-        
         try {
             val paths = listOf("server/smartfoodup_model", "smartfoodup_model", "/app/server/smartfoodup_model")
             for (path in paths) {
@@ -110,7 +108,7 @@ object PredictionService {
     private fun realizarInferenciaReal(cleanB64: String): Int {
         val bundle = modelBundle ?: throw Exception("No Model")
         val imageBytes = Base64.getDecoder().decode(cleanB64)
-        val image = ImageIO.read(ByteArrayInputStream(imageBytes)) ?: throw Exception("Error al leer bytes de imagen")
+        val image = ImageIO.read(ByteArrayInputStream(imageBytes)) ?: throw Exception("Error al leer imagen")
         val resized = BufferedImage(224, 224, BufferedImage.TYPE_INT_RGB)
         resized.createGraphics().drawImage(image, 0, 0, 224, 224, null)
 
@@ -125,7 +123,18 @@ object PredictionService {
         }
 
         TFloat32.tensorOf(input).use { t ->
-            val res = bundle.session().runner().feed("serving_default_input_1", t).fetch("StatefulPartitionedCall").run()
+            // Intentamos detectar el nombre de la entrada dinámicamente
+            val signature = bundle.metaGraphDef().getSignatureDefOrThrow("serving_default")
+            val inputName = signature.getInputsMap().keys.firstOrNull() ?: "serving_default_input_1"
+            val outputName = signature.getOutputsMap().keys.firstOrNull() ?: "StatefulPartitionedCall"
+            
+            println("🎯 Usando entrada detectada: $inputName")
+
+            val res = bundle.session().runner()
+                .feed(inputName, t)
+                .fetch(outputName)
+                .run()
+
             res[0].use { out ->
                 val probs = out as TFloat32
                 var max = 0; var maxP = -1.0f
@@ -147,8 +156,8 @@ object PredictionService {
     }
 
     private suspend fun obtenerInfoExtraGemini(fruta: String, estado: String, saludable: Boolean, raw: String, key: String): PredictionResult {
-        // Usamos v1beta que es más flexible
-        val url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$key"
+        // CAMBIO A GEMINI 2.0 FLASH
+        val url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=$key"
         val prompt = "Alimento: $fruta ($estado). Responde SOLO un JSON plano: {\"porcentaje\": 85, \"dias\": \"X dias\", \"comer\": \"recetas\"}"
         
         return try {
@@ -179,8 +188,8 @@ object PredictionService {
     }
 
     private suspend fun predecirConGeminiTotal(cleanB64: String, mime: String, key: String): PredictionResult {
-        // Usamos v1beta que es más flexible
-        val url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$key"
+        // CAMBIO A GEMINI 2.0 FLASH
+        val url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=$key"
         val bodyStr = """
             {
               "contents": [{
