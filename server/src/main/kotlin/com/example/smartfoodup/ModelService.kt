@@ -9,9 +9,9 @@ import io.ktor.client.statement.*
 import io.ktor.utils.io.core.*
 import java.io.File
 
-object ModelService {
+object `ModelServices.kt` {
     // ⚠️ Reemplaza con el ID público de tu modelo en Google Drive
-    private const val DRIVE_FILE_ID = "TU_ID_DE_GOOGLE_DRIVE_AQUI"
+    private const val DRIVE_FILE_ID = "1TxFYdQKSIaVomFVxlgrMUNB_QQo09T-d"
     private const val MODEL_FILENAME = "modelo_smartfoodup_36clases.h5"
 
     suspend fun obtenerModeloFile(): File {
