@@ -28,12 +28,19 @@ fun Route.iaRouting() {
 
                 multipart.forEachPart { part ->
                     if (part is PartData.FileItem) {
+                        // Simulamos que el modelo retorna un índice para mantener tu flujo
                         val predictedIndex = (0..35).random()
-                        // mapearPrediccion es suspend, por lo que debe llamarse aquí
-                        resultadoPrediccion = PredictionService.mapearPrediccion(predictedIndex)
+
+                        // NOTA: No podemos llamar a mapearPrediccion (suspend) directamente aquí si no estamos en un coroutine scope
+                        // Pero el bloque post { } de Ktor YA es un coroutine scope.
                     }
                     part.dispose()
                 }
+                
+                // Para que el flujo sea real, necesitamos ejecutar la predicción.
+                // Re-inicializamos para prueba
+                val predictedIndex = (0..35).random()
+                resultadoPrediccion = PredictionService.mapearPrediccion(predictedIndex)
 
                 if (resultadoPrediccion != null) {
                     call.respond(

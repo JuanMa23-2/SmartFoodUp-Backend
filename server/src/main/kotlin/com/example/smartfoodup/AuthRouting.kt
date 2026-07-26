@@ -7,7 +7,7 @@ import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.select
-import org.jetbrains.exposed.sql.transactions.transaction
+import org.jetbrains.exposed.sql.transactions.experimental.newSuspendedTransaction
 import org.mindrot.jbcrypt.BCrypt
 
 fun Route.authRouting() {
@@ -15,12 +15,11 @@ fun Route.authRouting() {
     route("/auth") {
         post("/registro") {
             val request = call.receive<RegistroRequest>()
-            var errorMensaje: String? = null
             
-            transaction {
+            val result = newSuspendedTransaction {
                 val existe = Usuarios.select { Usuarios.email eq request.email }.singleOrNull()
                 if (existe != null) {
-                    errorMensaje = "El correo ya está registrado"
+                    "Existe"
                 } else {
                     val passwordHasheada = BCrypt.hashpw(request.contrasena, BCrypt.gensalt())
                     Usuarios.insert {
@@ -29,40 +28,40 @@ fun Route.authRouting() {
                         it[passwordHash] = passwordHasheada
                         it[rol] = "CLIENTE"
                     }
+                    "Ok"
                 }
             }
 
-            if (errorMensaje != null) {
-                call.respond(HttpStatusCode.Conflict, AuthResponse(exitoso = false, mensaje = errorMensaje!!))
-            } else {
-                call.respond(HttpStatusCode.Created, AuthResponse(exitoso = true, mensaje = "Usuario registrado"))
+            when (result) {
+                "Existe" -> call.respond(HttpStatusCode.Conflict, AuthResponse(exitoso = false, mensaje = "El correo ya está registrado"))
+                "Ok" -> call.respond(HttpStatusCode.Created, AuthResponse(exitoso = true, mensaje = "Usuario registrado"))
+                else -> call.respond(HttpStatusCode.InternalServerError, AuthResponse(exitoso = false, mensaje = "Error desconocido"))
             }
         }
 
         post("/login") {
             val request = call.receive<LoginRequest>()
             val emailLimpio = request.email.trim()
-            var response: AuthResponse? = null
 
-            transaction {
+            val response = newSuspendedTransaction {
                 val usuario = Usuarios.select { Usuarios.email eq emailLimpio }.singleOrNull()
                 if (usuario == null) {
-                    response = AuthResponse(exitoso = false, mensaje = "Usuario no encontrado")
+                    AuthResponse(exitoso = false, mensaje = "Usuario no encontrado")
                 } else {
                     val passwordEnBd = usuario[Usuarios.passwordHash]
                     if (BCrypt.checkpw(request.contrasena, passwordEnBd)) {
-                        response = AuthResponse(
+                        AuthResponse(
                             exitoso = true,
                             mensaje = "Bienvenido",
                             nombre = usuario[Usuarios.nombre],
                             rol = usuario[Usuarios.rol]
                         )
                     } else {
-                        response = AuthResponse(exitoso = false, mensaje = "Contraseña incorrecta")
+                        AuthResponse(exitoso = false, mensaje = "Contraseña incorrecta")
                     }
                 }
             }
-            call.respond(if (response?.exitoso == true) HttpStatusCode.OK else HttpStatusCode.Unauthorized, response!!)
+            call.respond(if (response.exitoso) HttpStatusCode.OK else HttpStatusCode.Unauthorized, response)
         }
     }
 
@@ -87,7 +86,7 @@ fun Route.authRouting() {
                     return@post
                 }
 
-                transaction {
+                newSuspendedTransaction {
                     AlimentosLocales.insert {
                         it[nombre] = request.nombre
                         it[categoria] = request.categoria
