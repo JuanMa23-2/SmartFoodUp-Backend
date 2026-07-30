@@ -17,6 +17,7 @@ fun Application.module() {
     configureRouting()
 }
 
+// Configuracion de serializacion JSON con soporte para campos desconocidos.
 fun Application.configureSerialization() {
     install(ContentNegotiation) {
         json(Json {
@@ -27,6 +28,7 @@ fun Application.configureSerialization() {
     }
 }
 
+// Registro de los modulos de rutas principales del sistema.
 fun Application.configureRouting() {
     routing {
         authRouting()
@@ -34,30 +36,32 @@ fun Application.configureRouting() {
     }
 }
 
+// Configuracion y conexion a la base de datos MySQL con logica de reintento.
 fun Application.configureDatabase() {
-    // Tomamos las variables estrictamente de Railway
-    val host = System.getenv("MYSQLHOST")?.takeIf { it.isNotBlank() }
-    val port = System.getenv("MYSQLPORT") ?: "3306"
-    val database = System.getenv("MYSQLDATABASE")
-    val user = System.getenv("MYSQLUSER")
-    val password = System.getenv("MYSQLPASSWORD")
-
-    if (host == null || database == null) {
-        println("❌ ERROR CRÍTICO: No se encontraron variables de base de datos. El servidor no conectará a nada.")
-        return
-    }
+    val host = System.getenv("MYSQLHOST")?.takeIf { it.isNotBlank() } ?: "mysql.railway.internal"
+    val port = System.getenv("MYSQLPORT")?.takeIf { it.isNotBlank() } ?: "3306"
+    val database = System.getenv("MYSQLDATABASE")?.takeIf { it.isNotBlank() } ?: "railway"
+    val user = System.getenv("MYSQLUSER")?.takeIf { it.isNotBlank() } ?: "root"
+    val password = System.getenv("MYSQLPASSWORD")?.takeIf { it.isNotBlank() } ?: ""
 
     val jdbcUrl = "jdbc:mysql://$host:$port/$database?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true"
-    println("🚀 Conectando a Base de Datos en: $host")
 
-    try {
-        Database.connect(jdbcUrl, "com.mysql.cj.jdbc.Driver", user ?: "root", password ?: "")
-        transaction {
-            // Esto creará las tablas en la base de datos VACÍA que ves en Railway
-            SchemaUtils.create(Usuarios, Dispositivos, MedicionesSensores, AnalisisIa, RecomendacionesConsumo, AlimentosLocales)
+    println("Iniciando conexion a base de datos: $jdbcUrl")
+
+    var connected = false
+    var attempts = 0
+    while (!connected && attempts < 3) {
+        try {
+            Database.connect(jdbcUrl, "com.mysql.cj.jdbc.Driver", user, password)
+            transaction {
+                SchemaUtils.create(Usuarios, Dispositivos, MedicionesSensores, AnalisisIa, RecomendacionesConsumo, AlimentosLocales)
+            }
+            println("Conexion establecida exitosamente.")
+            connected = true
+        } catch (e: Exception) {
+            attempts++
+            println("Intento de conexion $attempts fallido: ${e.message}")
+            if (attempts < 3) Thread.sleep(2000)
         }
-        println("✅ Base de datos nueva configurada y lista.")
-    } catch (e: Exception) {
-        println("❌ Error de conexión: ${e.message}")
     }
 }
