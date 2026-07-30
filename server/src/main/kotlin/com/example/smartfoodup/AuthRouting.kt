@@ -51,13 +51,18 @@ fun Route.authRouting() {
             try {
                 val request = call.receive<AlimentoRequest>()
                 
+                // Si la peticion incluye una imagen en Base64, se prioriza el analisis por IA
                 if (!request.imagenBytesBase64.isNullOrBlank()) {
                     val resultadoIa = PredictionService.predecirImagen(request.imagenBytesBase64)
+                    
+                    // Se verifica si la deteccion fue exitosa para responder adecuadamente al frontend.
+                    val esExitoso = !resultadoIa.errorOcurrido && resultadoIa.fruta != null
+                    
                     call.respond(
                         HttpStatusCode.OK,
                         AlimentoResponse(
-                            exitoso = resultadoIa.fruta != "Error",
-                            mensaje = if (resultadoIa.fruta == "Error") "Error en el analisis" else "Analisis finalizado",
+                            exitoso = esExitoso,
+                            mensaje = if (esExitoso) "Analisis finalizado" else (resultadoIa.sugerencias ?: "Error en el analisis"),
                             alimento = resultadoIa.fruta,
                             estado = resultadoIa.estado,
                             porcentajeFrescura = resultadoIa.porcentajeFrescura,
@@ -68,6 +73,7 @@ fun Route.authRouting() {
                     return@post
                 }
 
+                // Registro manual del alimento si no hay imagen presente
                 newSuspendedTransaction {
                     AlimentosLocales.insert {
                         it[nombre] = request.nombre
