@@ -91,7 +91,7 @@ object PredictionService {
     suspend fun predecirImagen(base64: String): PredictionResult {
         val apiKey = findApiKey()
         if (apiKey == "FALTA_KEY") {
-            return PredictionResult(null, null, 0.0, "API KEY ausente.", null, false, errorOcurrido = true, mensajeError = "API KEY ausente")
+            return PredictionResult(null, null, 0.0, "API KEY ausente.", "N/A", false, errorOcurrido = true, mensajeError = "Falta clave")
         }
 
         val cleanB64 = base64.substringAfter(",").replace("\n", "").replace("\r", "").replace(" ", "")
@@ -102,7 +102,6 @@ object PredictionService {
                 val classIndex = realizarInferenciaReal(cleanB64)
                 mapearPrediccion(classIndex, apiKey)
             } catch (e: Exception) {
-                println("Fallo inferencia local: ${e.message}")
                 predecirConGeminiTotal(cleanB64, mimeType, apiKey)
             }
         } else {
@@ -157,8 +156,9 @@ object PredictionService {
     }
 
     private suspend fun obtenerInfoExtraGemini(fruta: String, estado: String, saludable: Boolean, raw: String, key: String): PredictionResult {
-        val url = "https://generativelanguage.googleapis.com/v1/models/gemini-flash-latest:generateContent?key=$key"
-        val prompt = "Alimento: $fruta ($estado). JSON plano: {\"porcentaje\": 90, \"dias\": \"X dias aprox\", \"comer\": \"3 sugerencias cortas y detalladas numeradas\"}"
+        // USAMOS GEMINI 2.0 FLASH QUE ES EL QUE TIENES EN TU LISTA
+        val url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=$key"
+        val prompt = "Alimento: $fruta ($estado). JSON plano: {\"porcentaje\": 90, \"dias\": \"X dias aprox\", \"comer\": \"3 sugerencias cortas numeradas\"}"
         
         return try {
             val response: HttpResponse = iaClient.post(url) {
@@ -192,12 +192,13 @@ object PredictionService {
     }
 
     private suspend fun predecirConGeminiTotal(cleanB64: String, mime: String, key: String): PredictionResult {
-        val url = "https://generativelanguage.googleapis.com/v1/models/gemini-flash-latest:generateContent?key=$key"
+        // USAMOS GEMINI 2.0 FLASH
+        val url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=$key"
         val bodyStr = """
             {
               "contents": [{
                 "parts": [
-                  {"text": "Analiza frescura. JSON: 'fruta' (español), 'estado', 'porcentaje', 'dias', 'comer' (3 sugerencias numeradas)."},
+                  {"text": "Analiza frescura. JSON plano: 'fruta' (espanol), 'estado', 'porcentaje', 'dias', 'comer' (3 sugerencias numeradas)."},
                   {"inline_data": {"mime_type": "$mime", "data": "$cleanB64"}}
                 ]
               }]
