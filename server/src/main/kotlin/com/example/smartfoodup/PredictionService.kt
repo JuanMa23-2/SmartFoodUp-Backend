@@ -155,7 +155,7 @@ object PredictionService {
 
     private suspend fun obtenerInfoExtraGemini(fruta: String, estado: String, saludable: Boolean, raw: String, key: String): PredictionResult {
         val url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=$key"
-        val prompt = "Alimento: $fruta ($estado). Generar JSON plano: {\"porcentaje\": 85, \"dias\": \"X dias aprox\", \"comer\": \"receta resumida\"}"
+        val prompt = "Alimento: $fruta ($estado). Generar JSON plano: {\"porcentaje\": 85, \"dias\": \"X dias aprox\", \"comer\": \"Dar 3 sugerencias cortas numeradas de como consumirlo\"}"
         
         return try {
             val response: HttpResponse = iaClient.post(url) {
@@ -169,7 +169,7 @@ object PredictionService {
             val res = Json.parseToJsonElement(text.trim().removePrefix("```json").removeSuffix("```").trim()).jsonObject
             
             PredictionResult(fruta, if (saludable) "Fresco" else "Podrido", res["porcentaje"]?.jsonPrimitive?.double ?: 80.0,
-                "Vida util: ${res["dias"]?.jsonPrimitive?.content}", "Recetas: ${res["comer"]?.jsonPrimitive?.content}", saludable, raw)
+                "Vida util: ${res["dias"]?.jsonPrimitive?.content}", "Sugerencias: ${res["comer"]?.jsonPrimitive?.content}", saludable, raw)
         } catch (e: Exception) {
             PredictionResult(fruta, estado, 75.0, "Consumir pronto.", "Uso en preparaciones basicas.", saludable, raw)
         }
@@ -181,7 +181,7 @@ object PredictionService {
             {
               "contents": [{
                 "parts": [
-                  {"text": "Analiza el alimento y devuelve JSON: 'fruta' (espanol), 'estado', 'porcentaje', 'dias', 'comer'."},
+                  {"text": "Analiza el alimento y devuelve JSON: 'fruta' (espanol), 'estado', 'porcentaje', 'dias', 'comer' (3 sugerencias numeradas)."},
                   {"inline_data": {"mime_type": "$mime", "data": "$cleanB64"}}
                 ]
               }]
