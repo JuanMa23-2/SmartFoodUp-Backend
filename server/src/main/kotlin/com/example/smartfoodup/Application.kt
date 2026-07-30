@@ -33,6 +33,7 @@ fun Application.configureRouting() {
     routing {
         authRouting()
         iaRouting()
+        arRouting()
     }
 }
 
