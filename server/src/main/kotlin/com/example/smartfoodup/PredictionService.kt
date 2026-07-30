@@ -58,7 +58,7 @@ object PredictionService {
                 val modelDir = File(path)
                 if (modelDir.exists() && modelDir.isDirectory && File(modelDir, "saved_model.pb").exists()) {
                     modelBundle = SavedModelBundle.load(path, "serve")
-                    println("Modelo TensorFlow cargado correctamente.")
+                    println("Modelo TensorFlow cargado.")
                     break
                 }
             }
@@ -113,7 +113,7 @@ object PredictionService {
     private fun realizarInferenciaReal(cleanB64: String): Int {
         val bundle = modelBundle ?: throw Exception("No Model")
         val imageBytes = Base64.getDecoder().decode(cleanB64)
-        val image = ImageIO.read(ByteArrayInputStream(imageBytes)) ?: throw Exception("Imagen invalida")
+        val image = ImageIO.read(ByteArrayInputStream(imageBytes)) ?: throw Exception("Img Error")
         val resized = BufferedImage(224, 224, BufferedImage.TYPE_INT_RGB)
         resized.createGraphics().drawImage(image, 0, 0, 224, 224, null)
 
@@ -128,10 +128,10 @@ object PredictionService {
         }
 
         val signature = bundle.metaGraphDef().getSignatureDefOrThrow("serving_default")
-        val inputName = signature.getInputsMap().values.first().getName().substringBefore(":")
-        val outputName = signature.getOutputsMap().values.first().getName().substringBefore(":")
+        val inputName = signature.getInputsMap().values.first().name
+        val outputName = signature.getOutputsMap().values.first().name
 
-        TFloat32.tensorOf(inputData).use { t ->
+        return TFloat32.tensorOf(inputData).use { t ->
             bundle.session().runner().feed(inputName, t).fetch(outputName).run().use { res ->
                 val probs = res[0] as TFloat32
                 var max = 0
@@ -143,7 +143,7 @@ object PredictionService {
                         max = i
                     }
                 }
-                return max
+                max
             }
         }
     }
@@ -157,8 +157,8 @@ object PredictionService {
     }
 
     private suspend fun obtenerInfoExtraGemini(fruta: String, estado: String, saludable: Boolean, raw: String, key: String): PredictionResult {
-        val url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=$key"
-        val prompt = "Alimento: $fruta ($estado). JSON plano: {\"porcentaje\": 90, \"dias\": \"X dias aprox\", \"comer\": \"3 sugerencias cortas y detalladas numeradas para comerlo\"}"
+        val url = "https://generativelanguage.googleapis.com/v1/models/gemini-flash-latest:generateContent?key=$key"
+        val prompt = "Alimento: $fruta ($estado). JSON plano: {\"porcentaje\": 90, \"dias\": \"X dias aprox\", \"comer\": \"3 sugerencias cortas y detalladas numeradas\"}"
         
         return try {
             val response: HttpResponse = iaClient.post(url) {
@@ -170,7 +170,7 @@ object PredictionService {
             
             if (json.containsKey("error")) {
                 val errorMsg = json["error"]?.jsonObject?.get("message")?.jsonPrimitive?.content ?: "Error API"
-                return PredictionResult(fruta, estado, 80.0, "Aviso: $errorMsg", null, saludable, raw, true, errorMsg)
+                return PredictionResult(fruta, estado, 85.0, "Aviso: $errorMsg", "Consumir pronto.", saludable, raw, true, errorMsg)
             }
 
             val text = json["candidates"]?.jsonArray?.get(0)?.jsonObject
@@ -181,18 +181,18 @@ object PredictionService {
                 fruta = fruta,
                 estado = estado,
                 porcentajeFrescura = res["porcentaje"]?.jsonPrimitive?.double ?: 85.0,
-                sugerencias = "Vida útil: ${res["dias"]?.jsonPrimitive?.content}",
+                sugerencias = "Vida util: ${res["dias"]?.jsonPrimitive?.content}",
                 recetas = res["comer"]?.jsonPrimitive?.content,
                 esSaludable = saludable,
                 claseDetectada = raw
             )
         } catch (e: Exception) {
-            PredictionResult(fruta, estado, 75.0, "Consultar estado visualmente.", null, saludable, raw, true, e.message)
+            PredictionResult(fruta, estado, 75.0, "Consultar estado visual.", null, saludable, raw, true, e.message)
         }
     }
 
     private suspend fun predecirConGeminiTotal(cleanB64: String, mime: String, key: String): PredictionResult {
-        val url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=$key"
+        val url = "https://generativelanguage.googleapis.com/v1/models/gemini-flash-latest:generateContent?key=$key"
         val bodyStr = """
             {
               "contents": [{
@@ -225,7 +225,7 @@ object PredictionService {
                 fruta = res["fruta"]?.jsonPrimitive?.content,
                 estado = res["estado"]?.jsonPrimitive?.content,
                 porcentajeFrescura = res["porcentaje"]?.jsonPrimitive?.doubleOrNull ?: 80.0,
-                sugerencias = "Vida útil: ${res["dias"]?.jsonPrimitive?.content}",
+                sugerencias = "Vida util: ${res["dias"]?.jsonPrimitive?.content}",
                 recetas = res["comer"]?.jsonPrimitive?.content,
                 esSaludable = !(res["estado"]?.jsonPrimitive?.content?.contains("Deteriorado", true) ?: false),
                 claseDetectada = "IA_BACKUP"
