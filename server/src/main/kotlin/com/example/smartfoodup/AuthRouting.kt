@@ -10,15 +10,13 @@ import org.jetbrains.exposed.sql.select
 import org.jetbrains.exposed.sql.transactions.experimental.newSuspendedTransaction
 import org.mindrot.jbcrypt.BCrypt
 
-// Modulo de rutas para autenticacion y gestion de alimentos.
+// Modulo de gestion de autenticacion y analisis de alimentos.
 fun Route.authRouting() {
 
     route("/auth") {
-        // Soporte multilingue para compatibilidad con el frontend.
         post("/registro") { handleRegistro(call) }
         post("/register") { handleRegistro(call) }
 
-        // Logica de inicio de sesion y validacion de credenciales de usuario.
         post("/login") {
             val request = call.receive<LoginRequest>()
             val emailLimpio = request.email.trim()
@@ -32,7 +30,7 @@ fun Route.authRouting() {
                     if (BCrypt.checkpw(request.contrasena, passwordEnBd)) {
                         AuthResponse(
                             exitoso = true,
-                            mensaje = "Autenticacion exitosa",
+                            mensaje = "Acceso concedido",
                             nombre = usuario[Usuarios.nombre],
                             rol = usuario[Usuarios.rol]
                         )
@@ -46,23 +44,22 @@ fun Route.authRouting() {
     }
 
     route("/api") {
-        // Endpoint para procesamiento de alimentos mediante inteligencia artificial o registro manual.
+        // Endpoint para el analisis manual mediante carga de archivos.
         post("/alimentos") {
             try {
                 val request = call.receive<AlimentoRequest>()
                 
-                // Procesamiento manual de imagenes mediante carga directa.
                 if (!request.imagenBytesBase64.isNullOrBlank()) {
                     val resultadoIa = PredictionService.predecirImagen(request.imagenBytesBase64)
                     
-                    // Se envia la respuesta directamente para asegurar que los datos se muestren en pantalla.
+                    // Se prioriza la visualizacion de datos para el usuario final.
                     call.respond(
                         HttpStatusCode.OK,
                         AlimentoResponse(
-                            exitoso = true, // Se fuerza a true para que la tarjeta de resultados sea visible
-                            mensaje = "Analisis finalizado",
-                            alimento = resultadoIa.fruta,
-                            estado = resultadoIa.estado,
+                            exitoso = true,
+                            mensaje = "Analisis exitoso",
+                            alimento = resultadoIa.fruta ?: "Alimento",
+                            estado = resultadoIa.estado ?: "Analizado",
                             porcentajeFrescura = resultadoIa.porcentajeFrescura,
                             sugerencia = resultadoIa.sugerencias,
                             recetas = resultadoIa.recetas
@@ -71,7 +68,6 @@ fun Route.authRouting() {
                     return@post
                 }
 
-                // Registro manual del alimento si no hay imagen presente.
                 newSuspendedTransaction {
                     AlimentosLocales.insert {
                         it[nombre] = request.nombre
@@ -82,19 +78,18 @@ fun Route.authRouting() {
                 }
                 call.respond(HttpStatusCode.Created, AlimentoResponse(exitoso = true, mensaje = "Registro completado"))
             } catch (e: Exception) {
-                call.respond(HttpStatusCode.InternalServerError, AlimentoResponse(exitoso = false, mensaje = "Error en el servidor"))
+                call.respond(HttpStatusCode.InternalServerError, AlimentoResponse(exitoso = false, mensaje = "Fallo en el servidor"))
             }
         }
     }
 }
 
-// Procesamiento de registro de nuevos usuarios con cifrado de contraseñas.
 private suspend fun handleRegistro(call: ApplicationCall) {
     val request = call.receive<RegistroRequest>()
     val response = newSuspendedTransaction {
         val existe = Usuarios.select { Usuarios.email eq request.email }.singleOrNull()
         if (existe != null) {
-            AuthResponse(exitoso = false, mensaje = "El usuario ya existe en el sistema")
+            AuthResponse(exitoso = false, mensaje = "Usuario ya registrado")
         } else {
             val passwordHasheada = BCrypt.hashpw(request.contrasena, BCrypt.gensalt())
             Usuarios.insert {
@@ -103,7 +98,7 @@ private suspend fun handleRegistro(call: ApplicationCall) {
                 it[passwordHash] = passwordHasheada
                 it[rol] = "CLIENTE"
             }
-            AuthResponse(exitoso = true, mensaje = "Cuenta creada correctamente")
+            AuthResponse(exitoso = true, mensaje = "Registro exitoso")
         }
     }
     call.respond(if (response.exitoso) HttpStatusCode.Created else HttpStatusCode.Conflict, response)

@@ -16,14 +16,6 @@ data class LoginRequest(
 )
 
 @Serializable
-data class AdminRegistroRequest(
-    val nombre: String,
-    val email: String,
-    val contrasena: String,
-    val rol: String
-)
-
-@Serializable
 data class AuthResponse(
     val exitoso: Boolean,
     val mensaje: String,
@@ -47,5 +39,5 @@ data class AlimentoResponse(
     val estado: String? = null,
     val porcentajeFrescura: Double? = null,
     val sugerencia: String? = null,
-    val recetas: String? = null // NUEVO CAMPO: Para mostrar recetas directamente en la app
+    val recetas: String? = null
 )
