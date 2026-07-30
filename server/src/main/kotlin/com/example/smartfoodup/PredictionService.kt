@@ -29,11 +29,10 @@ data class PredictionResult(
     val errorOcurrido: Boolean = false
 )
 
-// Gestion del motor de inteligencia artificial y procesamiento de imagenes.
+// Gestion centralizada del procesamiento de imagenes y comunicacion con IA.
 object PredictionService {
     private val iaClient = HttpClient(CIO)
 
-    // Recuperacion de la clave de acceso para los servicios de Google.
     fun findApiKey(): String {
         val envKey = System.getenv("GEMINI_API_KEY")
         val propKey = System.getProperty("GEMINI_API_KEY")
@@ -51,7 +50,6 @@ object PredictionService {
         cargarModeloLocal()
     }
 
-    // Inicializacion del modelo local de TensorFlow para inferencia rapida.
     private fun cargarModeloLocal() {
         try {
             val paths = listOf("server/smartfoodup_model", "smartfoodup_model", "/app/server/smartfoodup_model")
@@ -59,12 +57,12 @@ object PredictionService {
                 val modelDir = File(path)
                 if (modelDir.exists() && modelDir.isDirectory && File(modelDir, "saved_model.pb").exists()) {
                     modelBundle = SavedModelBundle.load(path, "serve")
-                    println("Modelo TensorFlow cargado exitosamente.")
+                    println("Modelo TensorFlow cargado correctamente.")
                     break
                 }
             }
         } catch (e: Exception) {
-            println("Fallo al inicializar el modelo local: ${e.message}")
+            println("Error en la carga del modelo local: ${e.message}")
         }
     }
 
@@ -89,11 +87,10 @@ object PredictionService {
         "Strawberry" to "Fresa", "Tamarillo" to "Tomate de arbol", "Tomato" to "Tomate"
     )
 
-    // Procesa el flujo de imagen y determina el diagnostico del alimento.
     suspend fun predecirImagen(base64: String): PredictionResult {
         val apiKey = findApiKey()
         if (apiKey == "FALTA_KEY") {
-            return PredictionResult(null, null, 0.0, "API KEY ausente.", null, false, errorOcurrido = true)
+            return PredictionResult(null, null, 0.0, "API KEY ausente.", "N/A", false, errorOcurrido = true)
         }
 
         val cleanB64 = base64.substringAfter(",").replace("\n", "").replace("\r", "").replace(" ", "")
@@ -111,9 +108,8 @@ object PredictionService {
         }
     }
 
-    // Ejecucion de inferencia matematica sobre el modelo local.
     private fun realizarInferenciaReal(cleanB64: String): Int {
-        val bundle = modelBundle ?: throw Exception("Modelo no disponible")
+        val bundle = modelBundle ?: throw Exception("Sin modelo")
         val imageBytes = Base64.getDecoder().decode(cleanB64)
         val image = ImageIO.read(ByteArrayInputStream(imageBytes)) ?: throw Exception("Imagen invalida")
         val resized = BufferedImage(224, 224, BufferedImage.TYPE_INT_RGB)
@@ -156,7 +152,6 @@ object PredictionService {
         return obtenerInfoExtraGemini(nombre, if(esSaludable) "Fresco" else "Podrido", esSaludable, raw, key)
     }
 
-    // Consulta a la API de Gemini para obtener sugerencias de consumo y vida util.
     private suspend fun obtenerInfoExtraGemini(fruta: String, estado: String, saludable: Boolean, raw: String, key: String): PredictionResult {
         val url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$key"
         val prompt = "Alimento: $fruta ($estado). Responder estrictamente en JSON plano: {\"porcentaje\": 85, \"dias\": \"X dias aprox\", \"comer\": \"3 sugerencias cortas numeradas de consumo\"}"
@@ -186,7 +181,6 @@ object PredictionService {
         }
     }
 
-    // Analisis integral vision como respaldo para elementos no catalogados.
     private suspend fun predecirConGeminiTotal(cleanB64: String, mime: String, key: String): PredictionResult {
         val url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$key"
         val bodyStr = """
