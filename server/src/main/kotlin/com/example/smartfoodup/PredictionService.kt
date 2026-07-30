@@ -102,6 +102,7 @@ object PredictionService {
                 val classIndex = realizarInferenciaReal(cleanB64)
                 mapearPrediccion(classIndex, apiKey)
             } catch (e: Exception) {
+                println("Fallo inferencia local: ${e.message}")
                 predecirConGeminiTotal(cleanB64, mimeType, apiKey)
             }
         } else {
@@ -112,33 +113,35 @@ object PredictionService {
     private fun realizarInferenciaReal(cleanB64: String): Int {
         val bundle = modelBundle ?: throw Exception("No Model")
         val imageBytes = Base64.getDecoder().decode(cleanB64)
-        val image = ImageIO.read(ByteArrayInputStream(imageBytes)) ?: throw Exception("Img Error")
+        val image = ImageIO.read(ByteArrayInputStream(imageBytes)) ?: throw Exception("Imagen invalida")
         val resized = BufferedImage(224, 224, BufferedImage.TYPE_INT_RGB)
         resized.createGraphics().drawImage(image, 0, 0, 224, 224, null)
 
-        val input = NdArrays.ofFloats(Shape.of(1, 224, 224, 3))
+        val inputData = NdArrays.ofFloats(Shape.of(1, 224, 224, 3))
         for (y in 0 until 224) {
             for (x in 0 until 224) {
                 val p = resized.getRGB(x, y)
-                input.setFloat(((p shr 16) and 0xFF) / 255.0f, 0, y.toLong(), x.toLong(), 0)
-                input.setFloat(((p shr 8) and 0xFF) / 255.0f, 0, y.toLong(), x.toLong(), 1)
-                input.setFloat((p and 0xFF) / 255.0f, 0, y.toLong(), x.toLong(), 2)
+                inputData.setFloat(((p shr 16) and 0xFF) / 255.0f, 0, y.toLong(), x.toLong(), 0)
+                inputData.setFloat(((p shr 8) and 0xFF) / 255.0f, 0, y.toLong(), x.toLong(), 1)
+                inputData.setFloat((p and 0xFF) / 255.0f, 0, y.toLong(), x.toLong(), 2)
             }
         }
 
-        TFloat32.tensorOf(input).use { t ->
-            val signature = bundle.metaGraphDef().getSignatureDefOrThrow("serving_default")
-            val inputName = signature.getInputsMap().values.first().getName().substringBefore(":")
-            val outputName = signature.getOutputsMap().values.first().getName().substringBefore(":")
-            
-            val res = bundle.session().runner().feed(inputName, t).fetch(outputName).run()
+        val signature = bundle.metaGraphDef().getSignatureDefOrThrow("serving_default")
+        val inputName = signature.getInputsMap().values.first().getName().substringBefore(":")
+        val outputName = signature.getOutputsMap().values.first().getName().substringBefore(":")
 
-            res[0].use { out ->
-                val probs = out as TFloat32
-                var max = 0; var maxP = -1.0f
+        TFloat32.tensorOf(inputData).use { t ->
+            bundle.session().runner().feed(inputName, t).fetch(outputName).run().use { res ->
+                val probs = res[0] as TFloat32
+                var max = 0
+                var maxP = -1.0f
                 for (i in 0 until 36) {
                     val p = probs.getFloat(0, i.toLong())
-                    if (p > maxP) { maxP = p; max = i }
+                    if (p > maxP) {
+                        maxP = p
+                        max = i
+                    }
                 }
                 return max
             }
@@ -154,8 +157,8 @@ object PredictionService {
     }
 
     private suspend fun obtenerInfoExtraGemini(fruta: String, estado: String, saludable: Boolean, raw: String, key: String): PredictionResult {
-        val url = "https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=$key"
-        val prompt = "Alimento: $fruta ($estado). JSON plano: {\"porcentaje\": 90, \"dias\": \"X dias aprox\", \"comer\": \"3 sugerencias cortas y detalladas numeradas para consumirlo\"}"
+        val url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=$key"
+        val prompt = "Alimento: $fruta ($estado). JSON plano: {\"porcentaje\": 90, \"dias\": \"X dias aprox\", \"comer\": \"3 sugerencias cortas y detalladas numeradas para comerlo\"}"
         
         return try {
             val response: HttpResponse = iaClient.post(url) {
@@ -189,7 +192,7 @@ object PredictionService {
     }
 
     private suspend fun predecirConGeminiTotal(cleanB64: String, mime: String, key: String): PredictionResult {
-        val url = "https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=$key"
+        val url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=$key"
         val bodyStr = """
             {
               "contents": [{
