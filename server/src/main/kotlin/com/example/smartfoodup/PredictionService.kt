@@ -19,13 +19,14 @@ import javax.imageio.ImageIO
 
 @Serializable
 data class PredictionResult(
-    val fruta: String,
-    val estado: String,
+    val fruta: String?,
+    val estado: String?,
     val porcentajeFrescura: Double,
-    val sugerencias: String,
-    val recetas: String,
+    val sugerencias: String?,
+    val recetas: String?,
     val esSaludable: Boolean,
-    val claseDetectada: String = ""
+    val claseDetectada: String = "",
+    val errorOcurrido: Boolean = false // Indica internamente si hubo un fallo
 )
 
 // Gestion del analisis de imagenes mediante modelo local y API externa.
@@ -92,7 +93,7 @@ object PredictionService {
     suspend fun predecirImagen(base64: String): PredictionResult {
         val apiKey = findApiKey()
         if (apiKey == "FALTA_KEY") {
-            return PredictionResult("Error", "Configuracion", 0.0, "API KEY no detectada en el servidor.", "N/A", false)
+            return PredictionResult(null, null, 0.0, "API KEY no detectada.", "N/A", false, errorOcurrido = true)
         }
 
         val cleanB64 = base64.substringAfter(",").replace("\n", "").replace("\r", "").replace(" ", "")
@@ -173,7 +174,7 @@ object PredictionService {
             val res = Json.parseToJsonElement(text.trim().removePrefix("```json").removeSuffix("```").trim()).jsonObject
             
             PredictionResult(fruta, if (saludable) "Fresco" else "Podrido", res["porcentaje"]?.jsonPrimitive?.double ?: 80.0,
-                "Vida útil: ${res["dias"]?.jsonPrimitive?.content}", "Recetas: ${res["comer"]?.jsonPrimitive?.content}", saludable, raw)
+                "Vida util: ${res["dias"]?.jsonPrimitive?.content}", "Recetas: ${res["comer"]?.jsonPrimitive?.content}", saludable, raw)
         } catch (e: Exception) {
             PredictionResult(fruta, estado, 75.0, "Consumir pronto.", "Ideal para preparaciones basicas.", saludable, raw)
         }
@@ -205,16 +206,16 @@ object PredictionService {
             val res = Json.parseToJsonElement(text.trim().removePrefix("```json").removeSuffix("```").trim()).jsonObject
             
             PredictionResult(
-                fruta = res["fruta"]?.jsonPrimitive?.content ?: "Alimento",
-                estado = res["estado"]?.jsonPrimitive?.content ?: "Analizado",
+                fruta = res["fruta"]?.jsonPrimitive?.content,
+                estado = res["estado"]?.jsonPrimitive?.content,
                 porcentajeFrescura = res["porcentaje"]?.jsonPrimitive?.doubleOrNull ?: 80.0,
-                sugerencias = "Vida útil: ${res["dias"]?.jsonPrimitive?.content}",
+                sugerencias = "Vida util: ${res["dias"]?.jsonPrimitive?.content}",
                 recetas = "Sugerencias: ${res["comer"]?.jsonPrimitive?.content}",
                 esSaludable = !(res["estado"]?.jsonPrimitive?.content?.contains("Podrido", true) ?: false),
                 claseDetectada = "IA_BACKUP"
             )
         } catch (e: Exception) {
-            PredictionResult("Error", "Error de procesamiento", 0.0, "No se pudo realizar el analisis.", "N/A", false)
+            PredictionResult(null, null, 0.0, null, null, false, errorOcurrido = true)
         }
     }
 }

@@ -11,34 +11,45 @@ fun Route.arRouting() {
 
     route("/api/ar") {
         // Endpoint optimizado para el analisis de fotogramas de RA.
-        // Recibe la imagen en Base64 y devuelve el diagnostico detallado para superposicion en pantalla.
         post("/analisis") {
             try {
                 val request = call.receive<AlimentoRequest>()
                 
                 if (request.imagenBytesBase64.isNullOrBlank()) {
-                    call.respond(HttpStatusCode.BadRequest, AlimentoResponse(false, "No se recibio flujo de video"))
+                    call.respond(HttpStatusCode.OK, AlimentoResponse(false, "Camara en espera..."))
                     return@post
                 }
 
-                // Se utiliza el motor de prediccion hibrido para procesar el fotograma.
+                // Se ejecuta el proceso de prediccion.
                 val resultado = PredictionService.predecirImagen(request.imagenBytesBase64)
 
-                // Se retorna la estructura completa para que el frontend renderice la etiqueta de RA.
-                call.respond(
-                    HttpStatusCode.OK,
-                    AlimentoResponse(
-                        exitoso = resultado.fruta != "Error",
-                        mensaje = "Analisis de RA completado",
-                        alimento = resultado.fruta,
-                        estado = resultado.estado,
-                        porcentajeFrescura = resultado.porcentajeFrescura,
-                        sugerencia = resultado.sugerencias,
-                        recetas = resultado.recetas
+                // Si ocurrio un error interno o la IA no devolvio datos validos, se marca como no exitoso.
+                if (resultado.errorOcurrido || resultado.fruta == null) {
+                    call.respond(
+                        HttpStatusCode.OK,
+                        AlimentoResponse(
+                            exitoso = false,
+                            mensaje = "No se detecto un alimento claro. Intente mejorar la iluminacion."
+                        )
                     )
-                )
+                } else {
+                    // Respuesta exitosa: El Frontend renderizara la tarjeta de RA con los datos reales.
+                    call.respond(
+                        HttpStatusCode.OK,
+                        AlimentoResponse(
+                            exitoso = true,
+                            mensaje = "Alimento identificado",
+                            alimento = resultado.fruta,
+                            estado = resultado.estado,
+                            porcentajeFrescura = resultado.porcentajeFrescura,
+                            sugerencia = resultado.sugerencias,
+                            recetas = resultado.recetas
+                        )
+                    )
+                }
             } catch (e: Exception) {
-                call.respond(HttpStatusCode.InternalServerError, AlimentoResponse(false, "Error en el flujo de RA"))
+                // Manejo de fallos criticos en el flujo de datos.
+                call.respond(HttpStatusCode.OK, AlimentoResponse(false, "Procesando flujo de video..."))
             }
         }
     }
