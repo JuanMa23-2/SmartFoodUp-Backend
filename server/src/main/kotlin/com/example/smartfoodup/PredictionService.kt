@@ -31,13 +31,11 @@ data class PredictionResult(
     val mensajeError: String? = null
 )
 
-// Gestion avanzada de diagnostico de alimentos con filtrado de contenido.
+// Gestión de diagnóstico de alimentos mediante inteligencia artificial híbrida.
 object PredictionService {
     private val iaClient = HttpClient(CIO)
-    
     private var lastResult: PredictionResult? = null
     private var lastRequestTime: Long = 0
-    private val sugerenciasCache = ConcurrentHashMap<String, String>()
 
     fun findApiKey(): String {
         val envKey = System.getenv("OPENAI_API_KEY")
@@ -135,7 +133,7 @@ object PredictionService {
     private fun realizarInferenciaReal(cleanB64: String): Int {
         val bundle = modelBundle ?: throw Exception("Sin modelo")
         val imageBytes = Base64.getDecoder().decode(cleanB64)
-        val image = ImageIO.read(ByteArrayInputStream(imageBytes)) ?: throw Exception("Formato invalido")
+        val image = ImageIO.read(ByteArrayInputStream(imageBytes)) ?: throw Exception("Imagen invalida")
         val resized = BufferedImage(224, 224, BufferedImage.TYPE_INT_RGB)
         resized.createGraphics().drawImage(image, 0, 0, 224, 224, null)
 
@@ -176,7 +174,7 @@ object PredictionService {
     }
 
     private suspend fun obtenerSugerenciasOpenAI(fruta: String, estado: String, saludable: Boolean, raw: String, key: String): PredictionResult {
-        val prompt = "Analiza: $fruta ($estado). Responde SOLO JSON plano: {\"porcentaje\": 90, \"dias\": \"X dias aprox\", \"comer\": \"Dar 3 sugerencias cortas y detalladas numeradas separadas por \\n\"}"
+        val prompt = "Analiza el alimento $fruta en estado $estado. Responde SOLO JSON plano: {\"porcentaje\": 90, \"dias\": \"X dias aprox\", \"comer\": \"3 sugerencias numeradas con \\n\"}"
         
         return try {
             val response: HttpResponse = iaClient.post("https://api.openai.com/v1/chat/completions") {
@@ -197,17 +195,12 @@ object PredictionService {
             PredictionResult(fruta, estado, extraerDouble(res["porcentaje"], 90.0),
                 "Vida útil: ${extraerTexto(res["dias"])}", extraerTexto(res["comer"]), saludable, raw)
         } catch (e: Exception) {
-            PredictionResult(fruta, estado, 85.0, "Consultar visualmente.", "Uso basico.", saludable, raw)
+            PredictionResult(fruta, estado, 85.0, "Revisar visualmente.", "Consumir pronto.", saludable, raw)
         }
     }
 
     private suspend fun predecirConOpenAITotal(cleanB64: String, key: String): PredictionResult {
-        val prompt = """
-            Instruccion estricta: Analiza si hay una fruta o verdura clara. 
-            Si NO hay una fruta/verdura, responde: {"fruta": "No se detecto alimento", "estado": "N/A", "porcentaje": 0, "dias": "N/A", "comer": "N/A"}
-            Si HAY, responde JSON con terminos profesionales (Fresco, Maduro, Deteriorado). 
-            Si el estado es Deteriorado/Podrido, el porcentaje DEBE ser menor a 30.
-        """.trimIndent()
+        val prompt = "Identifica si hay fruta o verdura. Responde JSON plano: 'fruta' (nombre o 'NULO'), 'estado' (Fresco/Deteriorado), 'porcentaje' (0-100), 'dias', 'comer' (3 sugerencias con \\n)."
 
         return try {
             val response: HttpResponse = iaClient.post("https://api.openai.com/v1/chat/completions") {
@@ -235,15 +228,17 @@ object PredictionService {
             val res = Json.parseToJsonElement(content).jsonObject
             
             val nombre = extraerTexto(res["fruta"])
-            val porcentaje = extraerDouble(res["porcentaje"], 85.0)
+            if (nombre.contains("NULO", true)) {
+                return PredictionResult("No se detecto alimento", "N/A", 0.0, "N/A", "N/A", false, "ERROR")
+            }
 
             PredictionResult(
                 fruta = nombre,
                 estado = extraerTexto(res["estado"]),
-                porcentajeFrescura = porcentaje,
+                porcentajeFrescura = extraerDouble(res["porcentaje"], 85.0),
                 sugerencias = "Vida útil: ${extraerTexto(res["dias"])}",
                 recetas = extraerTexto(res["comer"]),
-                esSaludable = porcentaje > 40.0,
+                esSaludable = true,
                 claseDetectada = "OPENAI_VISION"
             )
         } catch (e: Exception) {
