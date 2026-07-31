@@ -31,7 +31,7 @@ data class PredictionResult(
     val mensajeError: String? = null
 )
 
-// Motor de inteligencia hibrida con filtrado de deteccion para Realidad Aumentada.
+// Gestion avanzada de diagnostico de alimentos con filtrado de contenido.
 object PredictionService {
     private val iaClient = HttpClient(CIO)
     
@@ -111,7 +111,7 @@ object PredictionService {
 
         val apiKey = findApiKey()
         if (apiKey == "FALTA_KEY") {
-            return PredictionResult(null, null, 0.0, "API KEY ausente.", null, false, errorOcurrido = true)
+            return PredictionResult("Falta Clave", null, 0.0, "N/A", null, false, errorOcurrido = true)
         }
 
         val cleanB64 = base64.substringAfter(",").replace("\n", "").replace("\r", "").replace(" ", "")
@@ -176,13 +176,7 @@ object PredictionService {
     }
 
     private suspend fun obtenerSugerenciasOpenAI(fruta: String, estado: String, saludable: Boolean, raw: String, key: String): PredictionResult {
-        val cacheKey = "${fruta}_$estado"
-        val cached = sugerenciasCache[cacheKey]
-        if (cached != null) {
-            return PredictionResult(fruta, estado, 92.0, "Vida útil: Estimada visualmente.", cached, saludable, raw)
-        }
-
-        val prompt = "Analiza el alimento $fruta ($estado). Responde SOLO JSON plano: {\"detectado\": true/false, \"porcentaje\": 90, \"dias\": \"X dias aprox\", \"comer\": \"Dar 3 sugerencias numeradas con \\n\"}"
+        val prompt = "Analiza: $fruta ($estado). Responde SOLO JSON plano: {\"porcentaje\": 90, \"dias\": \"X dias aprox\", \"comer\": \"Dar 3 sugerencias cortas y detalladas numeradas separadas por \\n\"}"
         
         return try {
             val response: HttpResponse = iaClient.post("https://api.openai.com/v1/chat/completions") {
@@ -200,20 +194,21 @@ object PredictionService {
             val content = Json.parseToJsonElement(response.bodyAsText()).jsonObject["choices"]?.jsonArray?.get(0)?.jsonObject?.get("message")?.jsonObject?.get("content")?.jsonPrimitive?.content ?: ""
             val res = Json.parseToJsonElement(content).jsonObject
             
-            val detectado = res["detectado"]?.jsonPrimitive?.boolean ?: true
-            if (!detectado) return PredictionResult(null, null, 0.0, null, null, false, errorOcurrido = true)
-
-            val recetas = extraerTexto(res["comer"])
-            sugerenciasCache[cacheKey] = recetas
-
             PredictionResult(fruta, estado, extraerDouble(res["porcentaje"], 90.0),
-                "Vida útil: ${extraerTexto(res["dias"])}", recetas, saludable, raw)
+                "Vida útil: ${extraerTexto(res["dias"])}", extraerTexto(res["comer"]), saludable, raw)
         } catch (e: Exception) {
-            PredictionResult(fruta, estado, 85.0, "Sugerencia visual.", "Lavar y consumir.", saludable, raw)
+            PredictionResult(fruta, estado, 85.0, "Consultar visualmente.", "Uso basico.", saludable, raw)
         }
     }
 
     private suspend fun predecirConOpenAITotal(cleanB64: String, key: String): PredictionResult {
+        val prompt = """
+            Instruccion estricta: Analiza si hay una fruta o verdura clara. 
+            Si NO hay una fruta/verdura, responde: {"fruta": "No se detecto alimento", "estado": "N/A", "porcentaje": 0, "dias": "N/A", "comer": "N/A"}
+            Si HAY, responde JSON con terminos profesionales (Fresco, Maduro, Deteriorado). 
+            Si el estado es Deteriorado/Podrido, el porcentaje DEBE ser menor a 30.
+        """.trimIndent()
+
         return try {
             val response: HttpResponse = iaClient.post("https://api.openai.com/v1/chat/completions") {
                 header(HttpHeaders.Authorization, "Bearer $key")
@@ -224,7 +219,7 @@ object PredictionService {
                         add(buildJsonObject {
                             put("role", "user")
                             put("content", buildJsonArray {
-                                add(buildJsonObject { put("type", "text"); put("text", "Analiza si hay una fruta o verdura. Responde JSON plano: 'fruta' (español), 'estado', 'porcentaje', 'dias', 'comer' (3 sugerencias con \\n). Si NO hay fruta responde 'fruta': 'NULO'.") })
+                                add(buildJsonObject { put("type", "text"); put("text", prompt) })
                                 add(buildJsonObject { 
                                     put("type", "image_url")
                                     put("image_url", buildJsonObject { put("url", "data:image/jpeg;base64,$cleanB64") })
@@ -239,22 +234,20 @@ object PredictionService {
             val content = Json.parseToJsonElement(response.bodyAsText()).jsonObject["choices"]?.jsonArray?.get(0)?.jsonObject?.get("message")?.jsonObject?.get("content")?.jsonPrimitive?.content ?: ""
             val res = Json.parseToJsonElement(content).jsonObject
             
-            val nombreFruta = extraerTexto(res["fruta"])
-            if (nombreFruta.contains("NULO", true)) {
-                return PredictionResult(null, null, 0.0, null, null, false, errorOcurrido = true)
-            }
+            val nombre = extraerTexto(res["fruta"])
+            val porcentaje = extraerDouble(res["porcentaje"], 85.0)
 
             PredictionResult(
-                fruta = nombreFruta,
+                fruta = nombre,
                 estado = extraerTexto(res["estado"]),
-                porcentajeFrescura = extraerDouble(res["porcentaje"], 85.0),
+                porcentajeFrescura = porcentaje,
                 sugerencias = "Vida útil: ${extraerTexto(res["dias"])}",
                 recetas = extraerTexto(res["comer"]),
-                esSaludable = true,
+                esSaludable = porcentaje > 40.0,
                 claseDetectada = "OPENAI_VISION"
             )
         } catch (e: Exception) {
-            PredictionResult(null, null, 0.0, null, null, false, "ERROR", true, e.message)
+            PredictionResult("No se detecto alimento", "N/A", 0.0, "N/A", "N/A", false, "ERROR")
         }
     }
 }
