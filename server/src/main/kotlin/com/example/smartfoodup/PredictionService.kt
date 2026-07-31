@@ -31,7 +31,7 @@ data class PredictionResult(
     val mensajeError: String? = null
 )
 
-// Motor de inteligencia hibrida optimizado para OpenAI Vision.
+// Motor de inteligencia hibrida optimizado para OpenAI Vision con parseo robusto.
 object PredictionService {
     private val iaClient = HttpClient(CIO)
     
@@ -87,6 +87,23 @@ object PredictionService {
         "Orange" to "Naranja", "Pomegranate" to "Granada", "Potato" to "Papa",
         "Strawberry" to "Fresa", "Tamarillo" to "Tomate de arbol", "Tomato" to "Tomate"
     )
+
+    // Auxiliar para extraer texto de JSON de forma segura (maneja texto y listas).
+    private fun extraerTexto(element: JsonElement?): String {
+        return when (element) {
+            is JsonPrimitive -> element.content
+            is JsonArray -> element.joinToString("\n") { if (it is JsonPrimitive) it.content else it.toString() }
+            else -> element?.toString() ?: ""
+        }
+    }
+
+    // Auxiliar para extraer numeros de JSON de forma segura.
+    private fun extraerDouble(element: JsonElement?, defecto: Double): Double {
+        return when (element) {
+            is JsonPrimitive -> element.doubleOrNull ?: element.content.toDoubleOrNull() ?: defecto
+            else -> defecto
+        }
+    }
 
     suspend fun predecirImagen(base64: String): PredictionResult {
         val currentTime = System.currentTimeMillis()
@@ -164,10 +181,10 @@ object PredictionService {
         val cacheKey = "${fruta}_$estado"
         val cached = sugerenciasCache[cacheKey]
         if (cached != null) {
-            return PredictionResult(fruta, estado, 90.0, "Consultar visualmente.", cached, saludable, raw)
+            return PredictionResult(fruta, estado, 92.0, "Vida útil: Estimada visualmente.", cached, saludable, raw)
         }
 
-        val prompt = "Alimento: $fruta ($estado). Responde SOLO en JSON plano: {\"porcentaje\": 90, \"dias\": \"X dias aprox\", \"comer\": \"3 sugerencias cortas y detalladas numeradas separadas por saltos de linea \\n\"}"
+        val prompt = "Alimento: $fruta ($estado). Responde SOLO en JSON plano: {\"porcentaje\": 90, \"dias\": \"X dias aprox\", \"comer\": \"Dar 3 sugerencias cortas y detalladas numeradas separadas por saltos de linea \\n\"}"
         
         return try {
             val response: HttpResponse = iaClient.post("https://api.openai.com/v1/chat/completions") {
@@ -182,19 +199,16 @@ object PredictionService {
                 }.toString())
             }
             
-            val responseText = response.bodyAsText()
-            val json = Json.parseToJsonElement(responseText).jsonObject
-            val content = json["choices"]?.jsonArray?.get(0)?.jsonObject?.get("message")?.jsonObject?.get("content")?.jsonPrimitive?.content ?: ""
+            val content = Json.parseToJsonElement(response.bodyAsText()).jsonObject["choices"]?.jsonArray?.get(0)?.jsonObject?.get("message")?.jsonObject?.get("content")?.jsonPrimitive?.content ?: ""
             val res = Json.parseToJsonElement(content).jsonObject
             
-            val sugerenciaVida = res["dias"]?.jsonPrimitive?.content ?: "Segun estado visual."
-            val recetas = res["comer"]?.jsonPrimitive?.content ?: "Lavar y consumir."
+            val recetas = extraerTexto(res["comer"])
             sugerenciasCache[cacheKey] = recetas
 
-            PredictionResult(fruta, estado, res["porcentaje"]?.jsonPrimitive?.doubleOrNull ?: 90.0,
-                "Vida útil: $sugerenciaVida", recetas, saludable, raw)
+            PredictionResult(fruta, estado, extraerDouble(res["porcentaje"], 90.0),
+                "Vida útil: ${extraerTexto(res["dias"])}", recetas, saludable, raw)
         } catch (e: Exception) {
-            PredictionResult(fruta, estado, 85.0, "Sugerencia visual.", "Lavar y consumir.", saludable, raw)
+            PredictionResult(fruta, estado, 85.0, "Revisar estado.", "Lavar y consumir.", saludable, raw)
         }
     }
 
@@ -221,22 +235,22 @@ object PredictionService {
                 }.toString())
             }
             
-            val responseText = response.bodyAsText()
-            val json = Json.parseToJsonElement(responseText).jsonObject
-            val content = json["choices"]?.jsonArray?.get(0)?.jsonObject?.get("message")?.jsonObject?.get("content")?.jsonPrimitive?.content ?: ""
+            val content = Json.parseToJsonElement(response.bodyAsText()).jsonObject["choices"]?.jsonArray?.get(0)?.jsonObject?.get("message")?.jsonObject?.get("content")?.jsonPrimitive?.content ?: ""
             val res = Json.parseToJsonElement(content).jsonObject
             
+            val estadoDetectado = extraerTexto(res["estado"])
+            
             PredictionResult(
-                fruta = res["fruta"]?.jsonPrimitive?.content,
-                estado = res["estado"]?.jsonPrimitive?.content,
-                porcentajeFrescura = res["porcentaje"]?.jsonPrimitive?.doubleOrNull ?: 85.0,
-                sugerencias = "Vida útil: ${res["dias"]?.jsonPrimitive?.content}",
-                recetas = res["comer"]?.jsonPrimitive?.content,
-                esSaludable = !(res["estado"]?.jsonPrimitive?.content?.contains("Deteriorado", true) ?: false),
+                fruta = extraerTexto(res["fruta"]),
+                estado = estadoDetectado,
+                porcentajeFrescura = extraerDouble(res["porcentaje"], 85.0),
+                sugerencias = "Vida útil: ${extraerTexto(res["dias"])}",
+                recetas = extraerTexto(res["comer"]),
+                esSaludable = !(estadoDetectado.contains("Deteriorado", true) || estadoDetectado.contains("Podrido", true)),
                 claseDetectada = "OPENAI_VISION"
             )
         } catch (e: Exception) {
-            PredictionResult("Error OpenAI", null, 0.0, "Ajustando formato: ${e.message}", null, false, "ERROR", true, e.message)
+            PredictionResult("Error Formato", null, 0.0, "Reintentando analisis...", null, false, "ERROR", true, e.message)
         }
     }
 }
