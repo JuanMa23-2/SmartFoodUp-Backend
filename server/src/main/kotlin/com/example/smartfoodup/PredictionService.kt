@@ -35,7 +35,7 @@ data class PredictionResult(
 object PredictionService {
     private val iaClient = HttpClient(CIO)
     
-    // Cache de seguridad para optimizar el saldo de la cuenta.
+    // Cache de optimizacion para no repetir peticiones identicas.
     private var lastResult: PredictionResult? = null
     private var lastRequestTime: Long = 0
     private val sugerenciasCache = ConcurrentHashMap<String, String>()
@@ -90,17 +90,18 @@ object PredictionService {
         "Strawberry" to "Fresa", "Tamarillo" to "Tomate de arbol", "Tomato" to "Tomate"
     )
 
-    // Logica principal de prediccion con control de cooldown para Realidad Aumentada.
+    // Orquestacion de prediccion con control de tiempo para Realidad Aumentada.
     suspend fun predecirImagen(base64: String): PredictionResult {
         val currentTime = System.currentTimeMillis()
         
+        // Retorno de cache si la peticion es demasiado frecuente.
         if (lastResult != null && (currentTime - lastRequestTime) < 5000) {
             return lastResult!!
         }
 
         val apiKey = findApiKey()
         if (apiKey == "FALTA_KEY") {
-            return PredictionResult(null, null, 0.0, "Configuracion OpenAI pendiente.", null, false, errorOcurrido = true)
+            return PredictionResult("Error: Clave OpenAI", null, 0.0, "Falta configurar OPENAI_API_KEY en Railway.", null, false, errorOcurrido = true)
         }
 
         val cleanB64 = base64.substringAfter(",").replace("\n", "").replace("\r", "").replace(" ", "")
@@ -110,6 +111,7 @@ object PredictionService {
                 val classIndex = realizarInferenciaReal(cleanB64)
                 mapearPrediccion(classIndex, apiKey)
             } catch (e: Exception) {
+                println("Inferencia local fallida, iniciando analisis con OpenAI.")
                 predecirConOpenAITotal(cleanB64, apiKey)
             }
         } else {
@@ -122,9 +124,9 @@ object PredictionService {
     }
 
     private fun realizarInferenciaReal(cleanB64: String): Int {
-        val bundle = modelBundle ?: throw Exception("No Model")
+        val bundle = modelBundle ?: throw Exception("Sin modelo")
         val imageBytes = Base64.getDecoder().decode(cleanB64)
-        val image = ImageIO.read(ByteArrayInputStream(imageBytes)) ?: throw Exception("Img Invalida")
+        val image = ImageIO.read(ByteArrayInputStream(imageBytes)) ?: throw Exception("Lectura de imagen fallida")
         val resized = BufferedImage(224, 224, BufferedImage.TYPE_INT_RGB)
         resized.createGraphics().drawImage(image, 0, 0, 224, 224, null)
 
@@ -164,15 +166,16 @@ object PredictionService {
         return obtenerSugerenciasOpenAI(nombre, if(esSaludable) "Fresco" else "Deteriorado", esSaludable, raw, key)
     }
 
-    // Consulta a GPT-4o-mini para obtener informacion detallada y formateada.
+    // Consulta de sugerencias a OpenAI GPT-4o-mini.
     private suspend fun obtenerSugerenciasOpenAI(fruta: String, estado: String, saludable: Boolean, raw: String, key: String): PredictionResult {
         val cacheKey = "${fruta}_$estado"
         val cached = sugerenciasCache[cacheKey]
         if (cached != null) {
-            return PredictionResult(fruta, estado, 90.0, "Consultar visualmente.", cached, saludable, raw)
+            return PredictionResult(fruta, estado, 92.0, "Vida útil: Según estado visual.", cached, saludable, raw)
         }
 
-        val prompt = "Alimento: $fruta ($estado). Responde SOLO en JSON plano: {\"porcentaje\": 90, \"dias\": \"X dias aprox\", \"comer\": \"Dar 3 sugerencias detalladas separadas por saltos de linea \\n\"}"
+        println("Solicitando sugerencias a OpenAI para: $fruta")
+        val prompt = "Alimento: $fruta ($estado). Responde SOLO en JSON plano: {\"porcentaje\": 90, \"dias\": \"X dias aprox\", \"comer\": \"3 sugerencias cortas y detalladas numeradas separadas por saltos de linea \\n\"}"
         
         return try {
             val response: HttpResponse = iaClient.post("https://api.openai.com/v1/chat/completions") {
@@ -191,18 +194,19 @@ object PredictionService {
             val content = json["choices"]?.jsonArray?.get(0)?.jsonObject?.get("message")?.jsonObject?.get("content")?.jsonPrimitive?.content ?: ""
             val res = Json.parseToJsonElement(content).jsonObject
             
-            val recetas = res["comer"]?.jsonPrimitive?.content ?: "Lavar y consumir."
+            val recetas = res["comer"]?.jsonPrimitive?.content ?: "Lavar y consumir pronto."
             sugerenciasCache[cacheKey] = recetas
 
-            PredictionResult(fruta, estado, res["porcentaje"]?.jsonPrimitive?.double ?: 85.0,
-                "Vida util estimada: ${res["dias"]?.jsonPrimitive?.content}", recetas, saludable, raw)
+            PredictionResult(fruta, estado, res["porcentaje"]?.jsonPrimitive?.double ?: 90.0,
+                "Vida útil: ${res["dias"]?.jsonPrimitive?.content}", recetas, saludable, raw)
         } catch (e: Exception) {
-            PredictionResult(fruta, estado, 75.0, "Revisar estado visual.", "Lavar antes de ingerir.", saludable, raw)
+            PredictionResult(fruta, estado, 85.0, "Error en sugerencias.", "Consumir segun preferencia.", saludable, raw)
         }
     }
 
-    // Analisis integral de imagen mediante GPT-4o-mini Vision.
+    // Analisis multimodal vision mediante OpenAI GPT-4o-mini.
     private suspend fun predecirConOpenAITotal(cleanB64: String, key: String): PredictionResult {
+        println("Iniciando analisis de vision con OpenAI...")
         return try {
             val response: HttpResponse = iaClient.post("https://api.openai.com/v1/chat/completions") {
                 header(HttpHeaders.Authorization, "Bearer $key")
@@ -213,7 +217,7 @@ object PredictionService {
                         add(buildJsonObject {
                             put("role", "user")
                             put("content", buildJsonArray {
-                                add(buildJsonObject { put("type", "text"); put("text", "Analiza frescura del alimento. Devuelve JSON: 'fruta' (español), 'estado', 'porcentaje', 'dias', 'comer' (3 sugerencias numeradas con saltos de linea \\n).") })
+                                add(buildJsonObject { put("type", "text"); put("text", "Analiza frescura. JSON: 'fruta' (español), 'estado', 'porcentaje', 'dias', 'comer' (3 sugerencias numeradas con \\n).") })
                                 add(buildJsonObject { 
                                     put("type", "image_url")
                                     put("image_url", buildJsonObject { put("url", "data:image/jpeg;base64,$cleanB64") })
@@ -232,14 +236,14 @@ object PredictionService {
             PredictionResult(
                 fruta = res["fruta"]?.jsonPrimitive?.content,
                 estado = res["estado"]?.jsonPrimitive?.content,
-                porcentajeFrescura = res["porcentaje"]?.jsonPrimitive?.doubleOrNull ?: 80.0,
-                sugerencias = "Vida util estimada: ${res["dias"]?.jsonPrimitive?.content}",
+                porcentajeFrescura = res["porcentaje"]?.jsonPrimitive?.doubleOrNull ?: 85.0,
+                sugerencias = "Vida útil: ${res["dias"]?.jsonPrimitive?.content}",
                 recetas = res["comer"]?.jsonPrimitive?.content,
                 esSaludable = !(res["estado"]?.jsonPrimitive?.content?.contains("Deteriorado", true) ?: false),
                 claseDetectada = "OPENAI_VISION"
             )
         } catch (e: Exception) {
-            PredictionResult(null, null, 0.0, null, null, false, "ERROR", true, e.message)
+            PredictionResult("Error OpenAI", null, 0.0, "Fallo en comunicacion: ${e.message}", null, false, "ERROR", true, e.message)
         }
     }
 }
