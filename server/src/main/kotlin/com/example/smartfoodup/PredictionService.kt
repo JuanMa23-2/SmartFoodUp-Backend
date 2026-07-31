@@ -31,22 +31,19 @@ data class PredictionResult(
     val mensajeError: String? = null
 )
 
-// Servicio avanzado para la gestion de cuotas e inteligencia hibrida con cache.
+// Motor de inteligencia hibrida: TensorFlow Local + OpenAI GPT-4o-mini.
 object PredictionService {
     private val iaClient = HttpClient(CIO)
     
+    // Cache de seguridad para optimizar el saldo de la cuenta.
     private var lastResult: PredictionResult? = null
     private var lastRequestTime: Long = 0
     private val sugerenciasCache = ConcurrentHashMap<String, String>()
 
+    // Obtencion de la clave de OpenAI desde el entorno de Railway.
     fun findApiKey(): String {
-        val envKey = System.getenv("GEMINI_API_KEY")
-        val propKey = System.getProperty("GEMINI_API_KEY")
-        return when {
-            !envKey.isNullOrBlank() && envKey.length > 15 -> envKey.trim()
-            !propKey.isNullOrBlank() -> propKey.trim()
-            else -> "FALTA_KEY"
-        }
+        val envKey = System.getenv("OPENAI_API_KEY")
+        return envKey?.trim() ?: "FALTA_KEY"
     }
 
     private var modelBundle: SavedModelBundle? = null
@@ -68,7 +65,7 @@ object PredictionService {
                 }
             }
         } catch (e: Exception) {
-            println("Aviso: Fallo inicializacion de modelo local.")
+            println("Error inicializando motor local.")
         }
     }
 
@@ -93,31 +90,30 @@ object PredictionService {
         "Strawberry" to "Fresa", "Tamarillo" to "Tomate de arbol", "Tomato" to "Tomate"
     )
 
+    // Logica principal de prediccion con control de cooldown para Realidad Aumentada.
     suspend fun predecirImagen(base64: String): PredictionResult {
         val currentTime = System.currentTimeMillis()
         
-        // Evitamos peticiones repetitivas en intervalos de menos de 5 segundos.
         if (lastResult != null && (currentTime - lastRequestTime) < 5000) {
             return lastResult!!
         }
 
         val apiKey = findApiKey()
         if (apiKey == "FALTA_KEY") {
-            return PredictionResult(null, null, 0.0, "API KEY ausente.", null, false, errorOcurrido = true)
+            return PredictionResult(null, null, 0.0, "Configuracion OpenAI pendiente.", null, false, errorOcurrido = true)
         }
 
         val cleanB64 = base64.substringAfter(",").replace("\n", "").replace("\r", "").replace(" ", "")
-        val mimeType = if (base64.contains("webp")) "image/webp" else "image/jpeg"
         
         val result = if (modelBundle != null) {
             try {
                 val classIndex = realizarInferenciaReal(cleanB64)
                 mapearPrediccion(classIndex, apiKey)
             } catch (e: Exception) {
-                predecirConGeminiTotal(cleanB64, mimeType, apiKey)
+                predecirConOpenAITotal(cleanB64, apiKey)
             }
         } else {
-            predecirConGeminiTotal(cleanB64, mimeType, apiKey)
+            predecirConOpenAITotal(cleanB64, apiKey)
         }
 
         lastRequestTime = currentTime
@@ -126,9 +122,9 @@ object PredictionService {
     }
 
     private fun realizarInferenciaReal(cleanB64: String): Int {
-        val bundle = modelBundle ?: throw Exception("Sin modelo")
+        val bundle = modelBundle ?: throw Exception("No Model")
         val imageBytes = Base64.getDecoder().decode(cleanB64)
-        val image = ImageIO.read(ByteArrayInputStream(imageBytes)) ?: throw Exception("Imagen invalida")
+        val image = ImageIO.read(ByteArrayInputStream(imageBytes)) ?: throw Exception("Img Invalida")
         val resized = BufferedImage(224, 224, BufferedImage.TYPE_INT_RGB)
         resized.createGraphics().drawImage(image, 0, 0, 224, 224, null)
 
@@ -143,11 +139,12 @@ object PredictionService {
         }
 
         val signature = bundle.metaGraphDef().getSignatureDefOrThrow("serving_default")
-        val inputName = signature.getInputsMap().values.first().name.substringBefore(":")
-        val outputName = signature.getOutputsMap().values.first().name.substringBefore(":")
+        val inputName = signature.getInputsMap().values.first().getName().substringBefore(":")
+        val outputName = signature.getOutputsMap().values.first().getName().substringBefore(":")
 
         TFloat32.tensorOf(inputData).use { t ->
-            bundle.session().runner().feed(inputName, t).fetch(outputName).run().use { res ->
+            val result = bundle.session().runner().feed(inputName, t).fetch(outputName).run()
+            result.use { res ->
                 val probs = res[0] as TFloat32
                 var max = 0; var maxP = -1.0f
                 for (i in 0 until 36) {
@@ -164,84 +161,82 @@ object PredictionService {
         val partes = raw.split("__")
         val nombre = traducciones[partes[0]] ?: partes[0]
         val esSaludable = !raw.contains("Rotten", true)
-        return obtenerInfoExtraGemini(nombre, if(esSaludable) "Fresco" else "Deteriorado", esSaludable, raw, key)
+        return obtenerSugerenciasOpenAI(nombre, if(esSaludable) "Fresco" else "Deteriorado", esSaludable, raw, key)
     }
 
-    private suspend fun obtenerInfoExtraGemini(fruta: String, estado: String, saludable: Boolean, raw: String, key: String): PredictionResult {
+    // Consulta a GPT-4o-mini para obtener informacion detallada y formateada.
+    private suspend fun obtenerSugerenciasOpenAI(fruta: String, estado: String, saludable: Boolean, raw: String, key: String): PredictionResult {
         val cacheKey = "${fruta}_$estado"
-        val recetasCached = sugerenciasCache[cacheKey]
-        if (recetasCached != null) {
-            return PredictionResult(fruta, estado, 88.0, "Consultar estado visual.", recetasCached, saludable, raw)
+        val cached = sugerenciasCache[cacheKey]
+        if (cached != null) {
+            return PredictionResult(fruta, estado, 90.0, "Consultar visualmente.", cached, saludable, raw)
         }
 
-        // USAMOS EL NOMBRE CORRECTO: gemini-flash-latest
-        val url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=$key"
-        val prompt = "Alimento: $fruta ($estado). JSON plano: {\"porcentaje\": 90, \"dias\": \"X dias aprox\", \"comer\": \"Dar 3 sugerencias detalladas separadas por saltos de linea \\n\"}"
+        val prompt = "Alimento: $fruta ($estado). Responde SOLO en JSON plano: {\"porcentaje\": 90, \"dias\": \"X dias aprox\", \"comer\": \"Dar 3 sugerencias detalladas separadas por saltos de linea \\n\"}"
         
         return try {
-            val response: HttpResponse = iaClient.post(url) {
+            val response: HttpResponse = iaClient.post("https://api.openai.com/v1/chat/completions") {
+                header(HttpHeaders.Authorization, "Bearer $key")
                 contentType(ContentType.Application.Json)
-                setBody("""{"contents":[{"parts":[{"text":"$prompt"}]}]}""")
+                setBody(buildJsonObject {
+                    put("model", "gpt-4o-mini")
+                    put("messages", buildJsonArray {
+                        add(buildJsonObject { put("role", "user"); put("content", prompt) })
+                    })
+                    put("response_format", buildJsonObject { put("type", "json_object") })
+                }.toString())
             }
-            val responseText = response.bodyAsText()
-            val json = Json.parseToJsonElement(responseText).jsonObject
             
-            if (json.containsKey("error")) {
-                val errorMsg = json["error"]?.jsonObject?.get("message")?.jsonPrimitive?.content ?: "Error"
-                return PredictionResult(fruta, estado, 85.0, "Info: $errorMsg", "Consumir pronto.", saludable, raw, true, errorMsg)
-            }
-
-            val text = json["candidates"]?.jsonArray?.get(0)?.jsonObject
-                ?.get("content")?.jsonObject?.get("parts")?.jsonArray?.get(0)?.jsonObject?.get("text")?.jsonPrimitive?.content ?: ""
-            val res = Json.parseToJsonElement(text.trim().removePrefix("```json").removeSuffix("```").trim()).jsonObject
+            val json = Json.parseToJsonElement(response.bodyAsText()).jsonObject
+            val content = json["choices"]?.jsonArray?.get(0)?.jsonObject?.get("message")?.jsonObject?.get("content")?.jsonPrimitive?.content ?: ""
+            val res = Json.parseToJsonElement(content).jsonObject
             
-            val recetasNuevas = res["comer"]?.jsonPrimitive?.content ?: "Consumir pronto."
-            sugerenciasCache[cacheKey] = recetasNuevas
+            val recetas = res["comer"]?.jsonPrimitive?.content ?: "Lavar y consumir."
+            sugerenciasCache[cacheKey] = recetas
 
-            PredictionResult(fruta, estado, res["porcentaje"]?.jsonPrimitive?.double ?: 90.0,
-                "Vida útil estimada: ${res["dias"]?.jsonPrimitive?.content}", recetasNuevas, saludable, raw)
+            PredictionResult(fruta, estado, res["porcentaje"]?.jsonPrimitive?.double ?: 85.0,
+                "Vida util estimada: ${res["dias"]?.jsonPrimitive?.content}", recetas, saludable, raw)
         } catch (e: Exception) {
-            PredictionResult(fruta, estado, 75.0, "Revision visual recomendada.", "Lavar y consumir.", saludable, raw)
+            PredictionResult(fruta, estado, 75.0, "Revisar estado visual.", "Lavar antes de ingerir.", saludable, raw)
         }
     }
 
-    private suspend fun predecirConGeminiTotal(cleanB64: String, mime: String, key: String): PredictionResult {
-        // USAMOS EL NOMBRE CORRECTO: gemini-flash-latest
-        val url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=$key"
-        val bodyStr = """
-            {
-              "contents": [{
-                "parts": [
-                  {"text": "Analiza frescura. JSON plano: 'fruta' (espanol), 'estado', 'porcentaje', 'dias', 'comer' (3 sugerencias numeradas con saltos de linea \\n)."},
-                  {"inline_data": {"mime_type": "$mime", "data": "$cleanB64"}}
-                ]
-              }]
-            }
-        """.trimIndent()
-
+    // Analisis integral de imagen mediante GPT-4o-mini Vision.
+    private suspend fun predecirConOpenAITotal(cleanB64: String, key: String): PredictionResult {
         return try {
-            val response: HttpResponse = iaClient.post(url) {
+            val response: HttpResponse = iaClient.post("https://api.openai.com/v1/chat/completions") {
+                header(HttpHeaders.Authorization, "Bearer $key")
                 contentType(ContentType.Application.Json)
-                setBody(bodyStr)
+                setBody(buildJsonObject {
+                    put("model", "gpt-4o-mini")
+                    put("messages", buildJsonArray {
+                        add(buildJsonObject {
+                            put("role", "user")
+                            put("content", buildJsonArray {
+                                add(buildJsonObject { put("type", "text"); put("text", "Analiza frescura del alimento. Devuelve JSON: 'fruta' (español), 'estado', 'porcentaje', 'dias', 'comer' (3 sugerencias numeradas con saltos de linea \\n).") })
+                                add(buildJsonObject { 
+                                    put("type", "image_url")
+                                    put("image_url", buildJsonObject { put("url", "data:image/jpeg;base64,$cleanB64") })
+                                })
+                            })
+                        })
+                    })
+                    put("response_format", buildJsonObject { put("type", "json_object") })
+                }.toString())
             }
-            val responseText = response.bodyAsText()
-            val json = Json.parseToJsonElement(responseText).jsonObject
-            if (json.containsKey("error")) {
-                val errorMsg = json["error"]?.jsonObject?.get("message")?.jsonPrimitive?.content ?: "Error"
-                return PredictionResult(null, null, 0.0, "Aviso Google: $errorMsg", null, false, "ERROR", true, errorMsg)
-            }
-            val text = json["candidates"]?.jsonArray?.get(0)?.jsonObject
-                ?.get("content")?.jsonObject?.get("parts")?.jsonArray?.get(0)?.jsonObject?.get("text")?.jsonPrimitive?.content ?: ""
-            val res = Json.parseToJsonElement(text.trim().removePrefix("```json").removeSuffix("```").trim()).jsonObject
+            
+            val json = Json.parseToJsonElement(response.bodyAsText()).jsonObject
+            val content = json["choices"]?.jsonArray?.get(0)?.jsonObject?.get("message")?.jsonObject?.get("content")?.jsonPrimitive?.content ?: ""
+            val res = Json.parseToJsonElement(content).jsonObject
             
             PredictionResult(
                 fruta = res["fruta"]?.jsonPrimitive?.content,
                 estado = res["estado"]?.jsonPrimitive?.content,
                 porcentajeFrescura = res["porcentaje"]?.jsonPrimitive?.doubleOrNull ?: 80.0,
-                sugerencias = "Vida útil: ${res["dias"]?.jsonPrimitive?.content}",
+                sugerencias = "Vida util estimada: ${res["dias"]?.jsonPrimitive?.content}",
                 recetas = res["comer"]?.jsonPrimitive?.content,
                 esSaludable = !(res["estado"]?.jsonPrimitive?.content?.contains("Deteriorado", true) ?: false),
-                claseDetectada = "IA_BACKUP"
+                claseDetectada = "OPENAI_VISION"
             )
         } catch (e: Exception) {
             PredictionResult(null, null, 0.0, null, null, false, "ERROR", true, e.message)
