@@ -23,81 +23,70 @@ data class PredictionResult(
     val esSaludable: Boolean,
     val claseDetectada: String = "",
     val errorOcurrido: Boolean = false,
+    val mensajeError: String? = null,
     val alertaRiesgo: String? = null,
     val infoHardware: String? = null,
     val hardwareOnline: Boolean = false,
-    val hardwareMensaje: String = "Esperando conexion de la Raspberry..."
+    val hardwareMensaje: String = "Esperando hardware..."
 )
 
-// Motor de diagnostico avanzado con validacion de pulso de hardware.
+// Motor de diagnóstico experto con lógica de seguridad alimentaria.
 object PredictionService {
     private val iaClient = HttpClient(CIO)
 
     fun findApiKey(): String {
-        return System.getenv("OPENAI_API_KEY") ?: "FALTA_KEY"
+        return System.getenv("OPENAI_API_KEY")?.trim() ?: "FALTA_KEY"
     }
 
-    // Verifica si la Raspberry ha mandado datos en los ultimos 60 segundos.
+    private fun extraerTexto(element: JsonElement?): String {
+        return when (element) {
+            is JsonPrimitive -> element.content
+            is JsonArray -> element.joinToString("\n") { if (it is JsonPrimitive) it.content else it.toString() }
+            else -> element?.toString() ?: "N/A"
+        }
+    }
+
     private suspend fun obtenerEstadoHardware(id: Int?): Pair<Boolean, String> {
-        if (id == null) return Pair(false, "Modo Manual (Sin sensores)")
+        if (id == null) return Pair(false, "Modo Cámara Directa")
         return try {
             newSuspendedTransaction {
                 val registro = MedicionesSensores.select { MedicionesSensores.dispositivoId eq id }
                     .orderBy(MedicionesSensores.id to SortOrder.DESC)
-                    .limit(1)
-                    .singleOrNull()
+                    .limit(1).singleOrNull()
 
-                if (registro == null) {
-                    Pair(false, "Estacion no vinculada. Encienda la Raspberry.")
-                } else {
+                if (registro == null) Pair(false, "Estación no detectada.")
+                else {
                     val fecha = registro[MedicionesSensores.fechaMedicion]
-                    val segundosTranscurridos = Duration.between(fecha, LocalDateTime.now()).seconds
-                    
-                    if (segundosTranscurridos < 60) {
-                        val peso = registro[MedicionesSensores.pesoGramos]
-                        val gas = registro[MedicionesSensores.gasPorcentaje]
-                        val temp = registro[MedicionesSensores.temperatura]
-                        val hum = registro[MedicionesSensores.humedad]
-                        Pair(true, "Estacion Online. Peso: ${peso}g | Gas: ${gas}% | Temp: ${temp}C | Hum: ${hum}%")
-                    } else {
-                        Pair(false, "Estacion fuera de linea. Ultima conexion: $segundosTranscurridos seg. atras.")
-                    }
+                    val diff = Duration.between(fecha, LocalDateTime.now()).seconds
+                    if (diff < 60) {
+                        val p = registro[MedicionesSensores.pesoGramos]
+                        val g = registro[MedicionesSensores.gasPorcentaje]
+                        Pair(true, "Hardware OK. Peso: ${p}g | Gas: ${g}%")
+                    } else Pair(false, "Estación Offline.")
                 }
             }
-        } catch (e: Exception) { Pair(false, "Error al consultar hardware.") }
+        } catch (e: Exception) { Pair(false, "Error de enlace.") }
     }
 
     suspend fun predecirImagen(base64: String, idDispositivo: Int? = null): PredictionResult {
         val apiKey = findApiKey()
-        if (apiKey == "FALTA_KEY") return PredictionResult("Falta Clave", null, 0.0, "N/A", null, false, errorOcurrido = true)
+        if (apiKey == "FALTA_KEY") return PredictionResult("Error Clave", null, 0.0, null, null, false, errorOcurrido = true)
         
         val (online, mensajeHardware) = obtenerEstadoHardware(idDispositivo)
         
-        // Si el usuario presiono el boton de estacion pero la Raspberry no esta conectada:
-        if (idDispositivo != null && !online) {
-            return PredictionResult(
-                fruta = "Estacion desconectada",
-                estado = "N/A",
-                porcentajeFrescura = 0.0,
-                sugerencias = "N/A",
-                recetas = "N/A",
-                esSaludable = false,
-                hardwareOnline = false,
-                hardwareMensaje = mensajeHardware
-            )
-        }
-
-        val cleanB64 = base64.substringAfter(",").replace("\n", "").replace("\r", "").replace(" ", "")
+        // Limpiador de Base64 ultra-robusto para evitar errores de galeria.
+        val cleanB64 = base64.substringAfter("base64,").replace("\n", "").replace("\r", "").replace(" ", "").trim()
         
-        val prompt = if (online) {
-            """
-            MODO ESTACION INTELIGENTE. Datos: $mensajeHardware.
-            Analiza imagen y sensores. Responde JSON: 'fruta', 'estado', 'porcentaje' (0-100), 'dias', 'comer', 'riesgo'.
-            REGLA DE SEGURIDAD: Si el porcentaje de salud es menor a 40, NO des recetas de comida, solo indica como desechar o compostar el producto.
-            """.trimIndent()
-        } else {
-            "Analiza el alimento visualmente. Responde JSON plano con: fruta, estado, porcentaje (0-100), dias, comer (3 sugerencias numeradas con \\n)."
-        }
+        val prompt = """
+            Eres un experto en seguridad alimentaria. Analiza la imagen [y estos datos: $mensajeHardware].
+            Responde estrictamente en JSON plano:
+            1. 'fruta': nombre en español (o 'NULO' si no hay comida).
+            2. 'estado': Fresco, Maduro, Muy Maduro o Deteriorado.
+            3. 'porcentaje': 0 a 100. SE RIGUROSO: Si hay moho, pudrición o deterioro visible, el valor DEBE ser entre 0 y 15.
+            4. 'dias': Vida útil. Si está deteriorado pon '0 días'.
+            5. 'comer': 3 sugerencias con \n. REGLA: Si porcentaje < 30, SOLO sugerir desecho/compostaje.
+            6. 'riesgo': (Solo si hay hardware) veredicto ambiental.
+        """.trimIndent()
         
         return try {
             val response: HttpResponse = iaClient.post("https://api.openai.com/v1/chat/completions") {
@@ -125,26 +114,26 @@ object PredictionService {
             val content = json["choices"]?.jsonArray?.get(0)?.jsonObject?.get("message")?.jsonObject?.get("content")?.jsonPrimitive?.content ?: ""
             val res = Json.parseToJsonElement(content).jsonObject
             
-            val frutaDetectada = res["fruta"]?.jsonPrimitive?.content ?: "No detectado"
-            
-            if (frutaDetectada.contains("NULO", true) || frutaDetectada.contains("No detectado", true)) {
-                return PredictionResult("No se detecto alimento", "N/A", 0.0, "N/A", "N/A", false, hardwareOnline = online, hardwareMensaje = mensajeHardware)
-            }
+            val fruta = res["fruta"]?.jsonPrimitive?.content ?: "NULO"
+            if (fruta.contains("NULO", true)) return PredictionResult("No detectado", "N/A", 0.0, "N/A", "N/A", false, hardwareOnline = online, hardwareMensaje = mensajeHardware)
+
+            val salud = res["porcentaje"]?.jsonPrimitive?.doubleOrNull ?: 0.0
 
             PredictionResult(
-                fruta = frutaDetectada,
+                fruta = fruta,
                 estado = res["estado"]?.jsonPrimitive?.content,
-                porcentajeFrescura = res["porcentaje"]?.jsonPrimitive?.doubleOrNull ?: 0.0,
+                porcentajeFrescura = salud,
                 sugerencias = res["dias"]?.jsonPrimitive?.content,
                 recetas = res["comer"]?.jsonPrimitive?.content,
-                esSaludable = (res["porcentaje"]?.jsonPrimitive?.doubleOrNull ?: 0.0) > 40.0,
+                esSaludable = salud > 30.0,
                 alertaRiesgo = res["riesgo"]?.jsonPrimitive?.content,
                 infoHardware = if (online) mensajeHardware else null,
                 hardwareOnline = online,
                 hardwareMensaje = mensajeHardware
             )
         } catch (e: Exception) {
-            PredictionResult("Error de procesamiento", null, 0.0, null, null, false, errorOcurrido = true)
+            println("Error IA: ${e.message}")
+            PredictionResult("Error de analisis", null, 0.0, null, null, false, errorOcurrido = true, mensajeError = e.message)
         }
     }
 
