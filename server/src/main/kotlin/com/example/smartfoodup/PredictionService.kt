@@ -12,6 +12,7 @@ import org.jetbrains.exposed.sql.select
 import org.jetbrains.exposed.sql.transactions.experimental.newSuspendedTransaction
 import org.jetbrains.exposed.sql.SortOrder
 import javax.imageio.ImageIO
+import java.io.ByteArrayInputStream
 
 @Serializable
 data class PredictionResult(
@@ -23,21 +24,22 @@ data class PredictionResult(
     val esSaludable: Boolean,
     val claseDetectada: String = "",
     val errorOcurrido: Boolean = false,
+    val mensajeError: String? = null,
     val alertaRiesgo: String? = null,
     val infoHardware: String? = null
 )
 
-// Motor de diagnostico integral mediante hardware y OpenAI Vision.
+// Motor de diagnóstico inteligente mediante hardware y OpenAI Vision.
 object PredictionService {
     private val iaClient = HttpClient(CIO)
 
     fun findApiKey(): String {
-        return System.getenv("OPENAI_API_KEY") ?: "FALTA_KEY"
+        return System.getenv("OPENAI_API_KEY")?.trim() ?: "FALTA_KEY"
     }
 
-    // Consulta la telemetria mas reciente de la Raspberry Pi en Railway.
+    // Consulta la telemetría más reciente de la Raspberry Pi.
     private suspend fun obtenerContextoHardware(id: Int?): String {
-        if (id == null) return "Sin conexion a sensores."
+        if (id == null) return "Análisis sin datos de hardware vinculados."
         return try {
             newSuspendedTransaction {
                 MedicionesSensores.select { MedicionesSensores.dispositivoId eq id }
@@ -45,26 +47,16 @@ object PredictionService {
                     .limit(1)
                     .map { 
                         "Hardware: Peso ${it[MedicionesSensores.pesoGramos]}g, Gas ${it[MedicionesSensores.gasPorcentaje]}%, Temp ${it[MedicionesSensores.temperatura]}C, Hum ${it[MedicionesSensores.humedad]}%."
-                    }.singleOrNull() ?: "Sin telemetria reciente."
+                    }.singleOrNull() ?: "Hardware vinculado pero sin mediciones recientes."
             }
-        } catch (e: Exception) { "Error al leer hardware." }
+        } catch (e: Exception) { "Hardware inaccesible en este momento." }
     }
 
     suspend fun predecirImagen(base64: String, idDispositivo: Int? = null): PredictionResult {
         val apiKey = findApiKey()
-        if (apiKey == "FALTA_KEY") {
-            return PredictionResult(
-                fruta = "Error: Falta Clave",
-                estado = null,
-                porcentajeFrescura = 0.0,
-                sugerencias = "N/A",
-                recetas = null,
-                esSaludable = false,
-                errorOcurrido = true
-            )
-        }
+        if (apiKey == "FALTA_KEY") return PredictionResult("Error: Clave API", null, 0.0, "Configurar OPENAI_API_KEY en Railway.", null, false, errorOcurrido = true)
         
-        val contextoHardware = obtenerContextoHardware(idDispositivo ?: 1)
+        val contextoHardware = obtenerContextoHardware(idDispositivo)
         val cleanB64 = base64.substringAfter(",").replace("\n", "").replace("\r", "").replace(" ", "")
         
         return predecirConOpenAITotal(cleanB64, apiKey, contextoHardware)
@@ -72,8 +64,16 @@ object PredictionService {
 
     private suspend fun predecirConOpenAITotal(cleanB64: String, key: String, hardware: String): PredictionResult {
         val prompt = """
-            Analiza el alimento. Datos de sensores: $hardware.
-            Responde JSON: 'fruta', 'estado' (Fresco/Maduro/Deteriorado), 'porcentaje', 'dias', 'comer' (3 sugerencias numeradas con \n), 'riesgo', 'inventario'.
+            Analiza el alimento mostrado en la imagen.
+            Contexto del hardware: $hardware.
+            Responde estrictamente en formato JSON plano con estos campos: 
+            'fruta' (nombre en español), 
+            'estado' (Fresco/Maduro/Deteriorado), 
+            'porcentaje' (índice de frescura 0-100), 
+            'dias' (vida útil estimada), 
+            'comer' (3 sugerencias numeradas separadas por saltos de línea \n),
+            'riesgo' (Analiza si el gas o humedad son peligrosos para este alimento), 
+            'inventario' (Sugerencia de compra según el peso detectado).
         """.trimIndent()
         
         return try {
@@ -97,7 +97,10 @@ object PredictionService {
                     put("response_format", buildJsonObject { put("type", "json_object") })
                 }.toString())
             }
-            val content = Json.parseToJsonElement(response.bodyAsText()).jsonObject["choices"]?.jsonArray?.get(0)?.jsonObject?.get("message")?.jsonObject?.get("content")?.jsonPrimitive?.content ?: ""
+            
+            val responseText = response.bodyAsText()
+            val json = Json.parseToJsonElement(responseText).jsonObject
+            val content = json["choices"]?.jsonArray?.get(0)?.jsonObject?.get("message")?.jsonObject?.get("content")?.jsonPrimitive?.content ?: ""
             val res = Json.parseToJsonElement(content).jsonObject
             
             PredictionResult(
@@ -107,41 +110,16 @@ object PredictionService {
                 sugerencias = res["dias"]?.jsonPrimitive?.content,
                 recetas = res["comer"]?.jsonPrimitive?.content,
                 esSaludable = true,
-                claseDetectada = "OPENAI_VISION",
                 alertaRiesgo = res["riesgo"]?.jsonPrimitive?.content,
                 infoHardware = hardware
             )
         } catch (e: Exception) { 
-            PredictionResult(
-                fruta = "Error Vision",
-                estado = "N/A",
-                porcentajeFrescura = 0.0,
-                sugerencias = "N/A",
-                recetas = "N/A",
-                esSaludable = false,
-                errorOcurrido = true
-            )
+            PredictionResult("Error en el Análisis", "Error", 0.0, "Fallo en la comunicación con OpenAI.", null, false, errorOcurrido = true, mensajeError = e.message) 
         }
     }
 
     suspend fun mapearPrediccion(idx: Int): PredictionResult {
-        // Mantenemos esta funcion para compatibilidad con IaRouting.kt
-        val raw = classNames.getOrElse(idx) { "Apple__Healthy" }
-        val partes = raw.split("__")
-        val nombre = traducciones[partes[0]] ?: partes[0]
-        val esSaludable = !raw.contains("Rotten", true)
-        
-        return PredictionResult(
-            fruta = nombre,
-            estado = if(esSaludable) "Fresco" else "Deteriorado",
-            porcentajeFrescura = if(esSaludable) 95.0 else 20.0,
-            sugerencias = "Analisis por catalogo local.",
-            recetas = "Consumir segun preferencia.",
-            esSaludable = esSaludable,
-            claseDetectada = raw
-        )
+        // Mantener por compatibilidad con análisis manual de catálogo.
+        return PredictionResult("Analizando...", null, 0.0, null, null, false, errorOcurrido = true)
     }
-
-    private val classNames = listOf("Apple__Healthy", "Apple__Rotten", "Banana__Healthy", "Banana__Rotten", "Bellpepper__Healthy", "Bellpepper__Rotten", "Carrot__Healthy", "Carrot__Rotten", "Cucumber__Healthy", "Cucumber__Rotten", "Grape__Healthy", "Grape__Rotten", "Guava__Healthy", "Guava__Rotten", "Jujube__Healthy", "Jujube__Rotten", "Lemon__Healthy", "Lemon__Rotten", "Lulo__Healthy", "Lulo__Rotten", "Mango__Healthy", "Mango__Rotten", "Okra__Healty", "Okra__Rotten", "Orange__Healthy", "Orange__Rotten", "Pomegranate__Healthy", "Pomegranate__Rotten", "Potato__Healthy", "Potato__Rotten", "Strawberry__Healthy", "Strawberry__Rotten", "Tamarillo__Healthy", "Tamarillo__Rotten", "Tomato__Healthy", "Tomato__Rotten")
-    private val traducciones = mapOf("Apple" to "Manzana", "Banana" to "Platano", "Bellpepper" to "Pimiento", "Carrot" to "Zanahoria", "Cucumber" to "Pepino", "Grape" to "Uva", "Guava" to "Guayaba", "Jujube" to "Azufaifa", "Lemon" to "Limon", "Lulo" to "Lulo", "Mango" to "Mango", "Okra" to "Okra", "Orange" to "Naranja", "Pomegranate" to "Granada", "Potato" to "Papa", "Strawberry" to "Fresa", "Tamarillo" to "Tomate de arbol", "Tomato" to "Tomate")
 }
