@@ -14,11 +14,9 @@ import org.mindrot.jbcrypt.BCrypt
 fun Route.authRouting() {
 
     route("/auth") {
-        // Registro de nuevos usuarios con soporte para multiples idiomas en el endpoint.
         post("/registro") { handleRegistro(call) }
         post("/register") { handleRegistro(call) }
 
-        // Validacion de acceso mediante comparacion de hash de contrasena.
         post("/login") {
             val request = call.receive<LoginRequest>()
             val emailLimpio = request.email.trim()
@@ -57,7 +55,7 @@ fun Route.authRouting() {
                         .map {
                             SensorDataRequest(
                                 deviceId = it[MedicionesSensores.dispositivoId],
-                                peso = it[MedicionesSensores.pesoGramos] / 1000.0, // Convertimos de vuelta a Kg
+                                peso = it[MedicionesSensores.pesoGramos] / 1000.0,
                                 humedad = it[MedicionesSensores.humedad],
                                 temperatura = it[MedicionesSensores.temperatura],
                                 gas = it[MedicionesSensores.gasPorcentaje]
@@ -71,15 +69,15 @@ fun Route.authRouting() {
             }
         }
 
-        // Procesamiento de alimentos: Analisis por IA enriquecido con sensores.
+        // Procesamiento de alimentos: Analisis por IA enriquecido con hardware.
         post("/alimentos") {
             try {
                 val request = call.receive<AlimentoRequest>()
                 
                 if (!request.imagenBytesBase64.isNullOrBlank()) {
-                    val resultadoIa = PredictionService.predecirImagen(request.imagenBytesBase64)
+                    // Llamada al motor de IA enviando el ID del dispositivo si existe.
+                    val resultadoIa = PredictionService.predecirImagen(request.imagenBytesBase64, request.dispositivoId)
                     
-                    // El campo alimento ya viene traducido o identificado por la IA.
                     call.respond(
                         HttpStatusCode.OK,
                         AlimentoResponse(
@@ -89,13 +87,15 @@ fun Route.authRouting() {
                             estado = resultadoIa.estado,
                             porcentajeFrescura = resultadoIa.porcentajeFrescura,
                             sugerencia = resultadoIa.sugerencias,
-                            recetas = resultadoIa.recetas
+                            recetas = resultadoIa.recetas,
+                            // Nuevos campos de hardware para el celular
+                            datosSensores = resultadoIa.infoHardware,
+                            alertaRiesgo = resultadoIa.alertaRiesgo
                         )
                     )
                     return@post
                 }
 
-                // Insercion en la tabla de alimentos locales si la peticion es un registro manual.
                 newSuspendedTransaction {
                     AlimentosLocales.insert {
                         it[nombre] = request.nombre
@@ -112,7 +112,6 @@ fun Route.authRouting() {
     }
 }
 
-// Logica privada para el manejo del registro de cuentas con verificacion de existencia previa.
 private suspend fun handleRegistro(call: ApplicationCall) {
     val request = call.receive<RegistroRequest>()
     val response = newSuspendedTransaction {
