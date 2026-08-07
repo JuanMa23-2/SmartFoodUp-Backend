@@ -79,7 +79,7 @@ object MedicionesSensores : Table("mediciones_sensores") {
     val gasAdc = integer("gas_adc")
     val gasPorcentaje = double("gas_porcentaje")
     val temperatura = double("temperatura")
-    val humidity = double("humedad")
+    val humedad = double("humedad")
     val fechaMedicion = datetime("fecha_medicion").default(LocalDateTime.now())
 
     override val primaryKey = PrimaryKey(id)
