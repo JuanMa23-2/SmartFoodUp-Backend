@@ -11,6 +11,7 @@ import org.jetbrains.exposed.sql.select
 import org.jetbrains.exposed.sql.transactions.experimental.newSuspendedTransaction
 import org.jetbrains.exposed.sql.SortOrder
 import java.time.LocalDateTime
+import java.time.Duration
 
 @Serializable
 data class PredictionResult(
@@ -25,10 +26,11 @@ data class PredictionResult(
     val mensajeError: String? = null,
     val alertaRiesgo: String? = null,
     val infoHardware: String? = null,
-    val hardwareOnline: Boolean? = null, // Cambiado a opcional para filtrado
+    val hardwareOnline: Boolean? = null,
     val hardwareMensaje: String? = null
 )
 
+// Motor de diagnóstico inteligente optimizado.
 object PredictionService {
     private val iaClient = HttpClient(CIO)
 
@@ -49,16 +51,19 @@ object PredictionService {
                     .orderBy(MedicionesSensores.id to SortOrder.DESC)
                     .limit(1).singleOrNull()
 
-                if (registro == null) Pair(false, "Estacion sin datos.")
+                if (registro == null) Pair(false, null)
                 else {
                     val p = registro[MedicionesSensores.pesoGramos]
                     val g = registro[MedicionesSensores.gasPorcentaje]
                     val t = registro[MedicionesSensores.temperatura]
                     val h = registro[MedicionesSensores.humedad]
-                    Pair(true, "Online. Peso: ${p}g | Gas: ${g}% | Temp: ${t}C | Hum: ${h}%")
+                    // Determinamos si es reciente (ultima hora) para mayor estabilidad
+                    val diff = Math.abs(Duration.between(registro[MedicionesSensores.fechaMedicion], LocalDateTime.now()).toMinutes())
+                    val online = diff < 60
+                    Pair(online, "Hardware: Peso ${p}g, Gas ${g}%, Temp ${t}C, Hum ${h}%")
                 }
             }
-        } catch (e: Exception) { Pair(false, "Error de enlace.") }
+        } catch (e: Exception) { Pair(false, null) }
     }
 
     suspend fun predecirImagen(base64: String, idDispositivo: Int? = null): PredictionResult {
@@ -68,20 +73,15 @@ object PredictionService {
         val (online, mensajeHardware) = obtenerDatosHardware(idDispositivo)
         val b64Limpio = limpiarBase64(base64)
         
-        // Si el usuario eligio modo estacion y no hay datos, enviamos error de hardware
-        if (idDispositivo != null && !online) {
-            return PredictionResult("Estacion no detectada", "N/A", 0.0, "N/A", "N/A", false, hardwareOnline = false, hardwareMensaje = "Raspberry fuera de linea")
-        }
-
-        val prompt = if (idDispositivo != null) {
+        val prompt = if (online) {
             """
             MODO ESTACION INTELIGENTE. Sensores: $mensajeHardware.
-            Analiza la imagen. Aunque la fruta este muy negra o dañada, IDENTIFICALA.
-            Responde JSON plano: 'fruta', 'estado' (Fresco/Maduro/Deteriorado), 'porcentaje' (0-100), 'dias', 'comer' (3 sugerencias con \n), 'riesgo' (analiza sensores).
-            REGLA: Si ves moho o color negro intenso, el porcentaje DEBE ser menor a 15 y di que no es comestible.
+            Analiza imagen y sensores. Responde JSON plano: 
+            'fruta' (ej: Platano), 'estado' (Fresco/Maduro/Deteriorado), 'porcentaje' (0-100), 'dias', 'comer' (3 sugerencias numeradas con \n), 'riesgo' (analiza sensores).
+            REGLA: Si moho o color negro, salud < 15 y aconseja desechar.
             """.trimIndent()
         } else {
-            "MODO NORMAL. Analiza la imagen. Responde JSON plano: 'fruta', 'estado', 'porcentaje' (0-100), 'dias', 'comer'. Si esta muy dañada, salud < 15."
+            "MODO NORMAL. Analiza la imagen. Responde JSON plano: 'fruta', 'estado', 'porcentaje' (0-100), 'dias', 'comer'. Si esta dañada, salud < 15."
         }
         
         return try {
@@ -110,20 +110,22 @@ object PredictionService {
             val content = json["choices"]?.jsonArray?.get(0)?.jsonObject?.get("message")?.jsonObject?.get("content")?.jsonPrimitive?.content ?: ""
             val res = Json.parseToJsonElement(content).jsonObject
             
-            val fruta = res["fruta"]?.jsonPrimitive?.content ?: "Desconocido"
+            val fruta = res["fruta"]?.jsonPrimitive?.content ?: "NULO"
+            if (fruta.contains("NULO", true)) return PredictionResult("No detectado", "N/A", 0.0, "N/A", "N/A", false)
+
             val salud = res["porcentaje"]?.jsonPrimitive?.doubleOrNull ?: 0.0
 
             PredictionResult(
-                fruta = if (fruta.contains("NULO", true)) "No detectado" else fruta,
+                fruta = fruta,
                 estado = res["estado"]?.jsonPrimitive?.content,
                 porcentajeFrescura = salud,
                 sugerencias = res["dias"]?.jsonPrimitive?.content,
                 recetas = res["comer"]?.jsonPrimitive?.content,
                 esSaludable = salud > 30.0,
                 alertaRiesgo = res["riesgo"]?.jsonPrimitive?.content,
-                infoHardware = if (idDispositivo != null) mensajeHardware else null,
-                hardwareOnline = if (idDispositivo != null) online else null, // Si es nulo, el front ocultara la barra
-                hardwareMensaje = if (idDispositivo != null) mensajeHardware else null
+                infoHardware = if (online) mensajeHardware else null,
+                hardwareOnline = if (online) true else null, // Solo enviamos true para mostrar, null para ocultar
+                hardwareMensaje = if (online) mensajeHardware else null
             )
         } catch (e: Exception) {
             PredictionResult("Error de analisis", null, 0.0, null, null, false, errorOcurrido = true)
