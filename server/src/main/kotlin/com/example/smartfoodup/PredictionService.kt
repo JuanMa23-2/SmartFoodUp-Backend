@@ -11,6 +11,7 @@ import java.io.File
 import org.jetbrains.exposed.sql.select
 import org.jetbrains.exposed.sql.transactions.experimental.newSuspendedTransaction
 import org.jetbrains.exposed.sql.SortOrder
+import javax.imageio.ImageIO
 
 @Serializable
 data class PredictionResult(
@@ -20,6 +21,7 @@ data class PredictionResult(
     val sugerencias: String?,
     val recetas: String?,
     val esSaludable: Boolean,
+    val claseDetectada: String = "",
     val errorOcurrido: Boolean = false,
     val alertaRiesgo: String? = null,
     val infoHardware: String? = null
@@ -50,7 +52,17 @@ object PredictionService {
 
     suspend fun predecirImagen(base64: String, idDispositivo: Int? = null): PredictionResult {
         val apiKey = findApiKey()
-        if (apiKey == "FALTA_KEY") return PredictionResult("Falta Clave", null, 0.0, "N/A", null, false, true)
+        if (apiKey == "FALTA_KEY") {
+            return PredictionResult(
+                fruta = "Error: Falta Clave",
+                estado = null,
+                porcentajeFrescura = 0.0,
+                sugerencias = "N/A",
+                recetas = null,
+                esSaludable = false,
+                errorOcurrido = true
+            )
+        }
         
         val contextoHardware = obtenerContextoHardware(idDispositivo ?: 1)
         val cleanB64 = base64.substringAfter(",").replace("\n", "").replace("\r", "").replace(" ", "")
@@ -61,7 +73,7 @@ object PredictionService {
     private suspend fun predecirConOpenAITotal(cleanB64: String, key: String, hardware: String): PredictionResult {
         val prompt = """
             Analiza el alimento. Datos de sensores: $hardware.
-            Responde JSON: 'fruta', 'estado' (Fresco/Maduro/Deteriorado), 'porcentaje', 'dias', 'comer' (3 sugerencias numeradas con \n), 'riesgo' (Analiza si el gas o humedad son peligrosos), 'inventario' (Segun el peso).
+            Responde JSON: 'fruta', 'estado' (Fresco/Maduro/Deteriorado), 'porcentaje', 'dias', 'comer' (3 sugerencias numeradas con \n), 'riesgo', 'inventario'.
         """.trimIndent()
         
         return try {
@@ -95,11 +107,41 @@ object PredictionService {
                 sugerencias = res["dias"]?.jsonPrimitive?.content,
                 recetas = res["comer"]?.jsonPrimitive?.content,
                 esSaludable = true,
+                claseDetectada = "OPENAI_VISION",
                 alertaRiesgo = res["riesgo"]?.jsonPrimitive?.content,
                 infoHardware = hardware
             )
-        } catch (e: Exception) { PredictionResult("Error Vision", "N/A", 0.0, "N/A", "N/A", false, true) }
+        } catch (e: Exception) { 
+            PredictionResult(
+                fruta = "Error Vision",
+                estado = "N/A",
+                porcentajeFrescura = 0.0,
+                sugerencias = "N/A",
+                recetas = "N/A",
+                esSaludable = false,
+                errorOcurrido = true
+            )
+        }
     }
 
-    suspend fun mapearPrediccion(idx: Int): PredictionResult = predecirImagen("")
+    suspend fun mapearPrediccion(idx: Int): PredictionResult {
+        // Mantenemos esta funcion para compatibilidad con IaRouting.kt
+        val raw = classNames.getOrElse(idx) { "Apple__Healthy" }
+        val partes = raw.split("__")
+        val nombre = traducciones[partes[0]] ?: partes[0]
+        val esSaludable = !raw.contains("Rotten", true)
+        
+        return PredictionResult(
+            fruta = nombre,
+            estado = if(esSaludable) "Fresco" else "Deteriorado",
+            porcentajeFrescura = if(esSaludable) 95.0 else 20.0,
+            sugerencias = "Analisis por catalogo local.",
+            recetas = "Consumir segun preferencia.",
+            esSaludable = esSaludable,
+            claseDetectada = raw
+        )
+    }
+
+    private val classNames = listOf("Apple__Healthy", "Apple__Rotten", "Banana__Healthy", "Banana__Rotten", "Bellpepper__Healthy", "Bellpepper__Rotten", "Carrot__Healthy", "Carrot__Rotten", "Cucumber__Healthy", "Cucumber__Rotten", "Grape__Healthy", "Grape__Rotten", "Guava__Healthy", "Guava__Rotten", "Jujube__Healthy", "Jujube__Rotten", "Lemon__Healthy", "Lemon__Rotten", "Lulo__Healthy", "Lulo__Rotten", "Mango__Healthy", "Mango__Rotten", "Okra__Healty", "Okra__Rotten", "Orange__Healthy", "Orange__Rotten", "Pomegranate__Healthy", "Pomegranate__Rotten", "Potato__Healthy", "Potato__Rotten", "Strawberry__Healthy", "Strawberry__Rotten", "Tamarillo__Healthy", "Tamarillo__Rotten", "Tomato__Healthy", "Tomato__Rotten")
+    private val traducciones = mapOf("Apple" to "Manzana", "Banana" to "Platano", "Bellpepper" to "Pimiento", "Carrot" to "Zanahoria", "Cucumber" to "Pepino", "Grape" to "Uva", "Guava" to "Guayaba", "Jujube" to "Azufaifa", "Lemon" to "Limon", "Lulo" to "Lulo", "Mango" to "Mango", "Okra" to "Okra", "Orange" to "Naranja", "Pomegranate" to "Granada", "Potato" to "Papa", "Strawberry" to "Fresa", "Tamarillo" to "Tomate de arbol", "Tomato" to "Tomate")
 }
