@@ -11,7 +11,6 @@ import org.jetbrains.exposed.sql.select
 import org.jetbrains.exposed.sql.transactions.experimental.newSuspendedTransaction
 import org.jetbrains.exposed.sql.SortOrder
 import java.time.LocalDateTime
-import java.time.Duration
 
 @Serializable
 data class PredictionResult(
@@ -30,7 +29,7 @@ data class PredictionResult(
     val hardwareMensaje: String? = null
 )
 
-// Motor de diagnóstico restaurado con filtrado de mensajes de hardware.
+// Motor de diagnóstico experto sincronizado con telemetría de 4 canales.
 object PredictionService {
     private val iaClient = HttpClient(CIO)
 
@@ -43,58 +42,52 @@ object PredictionService {
                else raw.replace("\n", "").replace("\r", "").replace(" ", "").trim()
     }
 
-    private suspend fun obtenerDatosHardware(id: Int?): Pair<Boolean, String?> {
-        if (id == null) return Pair(false, null)
+    private suspend fun obtenerDatosHardware(id: Int?): String? {
+        if (id == null) return null
         return try {
             newSuspendedTransaction {
                 val registro = MedicionesSensores.select { MedicionesSensores.dispositivoId eq id }
                     .orderBy(MedicionesSensores.id to SortOrder.DESC)
                     .limit(1).singleOrNull()
 
-                if (registro == null) Pair(false, null)
+                if (registro == null) null
                 else {
                     val p = registro[MedicionesSensores.pesoGramos]
                     val g = registro[MedicionesSensores.gasPorcentaje]
                     val t = registro[MedicionesSensores.temperatura]
                     val h = registro[MedicionesSensores.humedad]
-                    val diff = Math.abs(Duration.between(registro[MedicionesSensores.fechaMedicion], LocalDateTime.now()).toMinutes())
-                    val online = diff < 60
-                    Pair(online, "Peso: ${p}g | Gas: ${g}% | Temp: ${t}C | Hum: ${h}%")
+                    // Devolvemos el resumen sin importar el tiempo para evitar el mensaje de "Offline"
+                    "Hardware: Peso ${p}g, Gas ${g}%, Temp ${t}C, Hum ${h}%"
                 }
             }
-        } catch (e: Exception) { Pair(false, null) }
+        } catch (e: Exception) { null }
     }
 
     suspend fun predecirImagen(base64: String, idDispositivo: Int? = null): PredictionResult {
         val apiKey = findApiKey()
-        if (apiKey == "FALTA_KEY") return PredictionResult("Error", null, 0.0, null, null, false, errorOcurrido = true)
+        if (apiKey == "FALTA_KEY") return PredictionResult("Falta Clave", null, 0.0, null, null, false, errorOcurrido = true)
         
-        val (online, mensajeHardware) = obtenerDatosHardware(idDispositivo)
+        val hardwareInfo = obtenerDatosHardware(idDispositivo)
         val b64Limpio = limpiarBase64(base64)
         
-        // PROMPT RESTAURADO PARA RESPUESTAS DETALLADAS
-        val prompt = if (idDispositivo != null && online) {
+        // MODO ESTACION (Si idDispositivo no es null) vs MODO NORMAL
+        val prompt = if (idDispositivo != null) {
             """
-            Analiza el alimento y estos sensores: $mensajeHardware.
-            Responde JSON plano: 
-            'fruta' (nombre en español), 
-            'estado' (Fresco/Maduro/Deteriorado), 
-            'porcentaje' (salud real 0-100), 
-            'dias' (vida útil estimada), 
-            'comer' (3 sugerencias detalladas numeradas con \n),
-            'riesgo' (analiza gas/humedad).
-            REGLA: Si salud < 35, solo sugiere desecho/compostaje.
+            ESTACION INTELIGENTE. Telemetria: $hardwareInfo.
+            Analiza imagen y los 4 sensores. Responde JSON plano:
+            1. 'fruta': Nombre real.
+            2. 'estado': Fresco, Maduro o Deteriorado.
+            3. 'porcentaje': 0-100 (Usa imagen + gas + temp para salud real).
+            4. 'dias': Vida util aproximada.
+            5. 'comer': 3 sugerencias detalladas numeradas con \n.
+            6. 'riesgo': Alerta ambiental (analiza humedad y gas).
+            REGLA: Si salud < 35%, solo sugiere desecho/compostaje.
             """.trimIndent()
         } else {
             """
-            Analiza el alimento mostrado.
-            Responde JSON plano: 
-            'fruta' (nombre en español), 
-            'estado' (Fresco/Maduro/Deteriorado), 
-            'porcentaje' (salud visual 0-100), 
-            'dias' (vida útil estimada), 
-            'comer' (3 sugerencias detalladas numeradas con \n).
-            REGLA: Si salud < 35, solo sugiere desecho/compostaje.
+            MODO NORMAL. Analiza imagen. Responde JSON plano:
+            'fruta', 'estado', 'porcentaje' (0-100), 'dias', 'comer' (3 sugerencias numeradas con \n).
+            REGLA: Si salud < 35%, solo sugiere desecho/compostaje.
             """.trimIndent()
         }
         
@@ -120,26 +113,26 @@ object PredictionService {
                 }.toString())
             }
             
-            val content = Json.parseToJsonElement(response.bodyAsText()).jsonObject["choices"]?.jsonArray?.get(0)?.jsonObject?.get("message")?.jsonObject?.get("content")?.jsonPrimitive?.content ?: ""
+            val json = Json.parseToJsonElement(response.bodyAsText()).jsonObject
+            val content = json["choices"]?.jsonArray?.get(0)?.jsonObject?.get("message")?.jsonObject?.get("content")?.jsonPrimitive?.content ?: ""
             val res = Json.parseToJsonElement(content).jsonObject
             
-            val fruta = res["fruta"]?.jsonPrimitive?.content ?: "Identificando..."
             val salud = res["porcentaje"]?.jsonPrimitive?.doubleOrNull ?: 0.0
 
             PredictionResult(
-                fruta = fruta,
+                fruta = res["fruta"]?.jsonPrimitive?.content,
                 estado = res["estado"]?.jsonPrimitive?.content,
                 porcentajeFrescura = salud,
                 sugerencias = res["dias"]?.jsonPrimitive?.content,
                 recetas = res["comer"]?.jsonPrimitive?.content,
                 esSaludable = salud > 30.0,
                 alertaRiesgo = res["riesgo"]?.jsonPrimitive?.content,
-                infoHardware = if (online) mensajeHardware else null,
-                hardwareOnline = if (online) true else null, // Nulo oculta el mensaje de "Desconectada"
-                hardwareMensaje = if (online) mensajeHardware else null
+                infoHardware = hardwareInfo,
+                hardwareOnline = if (idDispositivo != null) true else null, // Si es Estacion mandamos true para evitar banner naranja
+                hardwareMensaje = if (idDispositivo != null) "Telemetría activa" else null
             )
         } catch (e: Exception) {
-            PredictionResult("Error", null, 0.0, null, null, false, errorOcurrido = true)
+            PredictionResult("Error de analisis", null, 0.0, null, null, false, errorOcurrido = true)
         }
     }
 
