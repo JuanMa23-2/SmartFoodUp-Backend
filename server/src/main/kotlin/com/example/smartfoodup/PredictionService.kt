@@ -11,9 +11,7 @@ import org.jetbrains.exposed.sql.select
 import org.jetbrains.exposed.sql.transactions.experimental.newSuspendedTransaction
 import org.jetbrains.exposed.sql.SortOrder
 import java.time.LocalDateTime
-import java.time.temporal.ChronoUnit
-import javax.imageio.ImageIO
-import java.io.ByteArrayInputStream
+import java.time.Duration
 
 @Serializable
 data class PredictionResult(
@@ -40,30 +38,30 @@ object PredictionService {
     }
 
     private fun limpiarBase64(raw: String): String {
-        return raw.substringAfter("base64,").replace("\n", "").replace("\r", "").replace(" ", "").trim()
+        return if (raw.contains(",")) raw.substringAfter(",") 
+               else raw.replace("\n", "").replace("\r", "").replace(" ", "").trim()
     }
 
     private suspend fun obtenerEstadoHardware(id: Int?): Pair<Boolean, String> {
-        if (id == null) return Pair(false, "Modo Cámara Directa")
+        if (id == null) return Pair(false, "Cámara")
         return try {
             newSuspendedTransaction {
                 val registro = MedicionesSensores.select { MedicionesSensores.dispositivoId eq id }
                     .orderBy(MedicionesSensores.id to SortOrder.DESC)
                     .limit(1).singleOrNull()
 
-                if (registro == null) Pair(false, "Sin datos en la nube.")
+                if (registro == null) Pair(false, "Sin datos.")
                 else {
                     val fecha = registro[MedicionesSensores.fechaMedicion]
-                    // Ajuste por Zona Horaria: Si la diferencia es menor a 12 horas, lo tomamos como reciente.
-                    val minutos = ChronoUnit.MINUTES.between(fecha, LocalDateTime.now())
-                    if (Math.abs(minutos) < 720) { // Tolerancia para cualquier zona horaria
+                    val diff = Math.abs(Duration.between(fecha, LocalDateTime.now()).toHours())
+                    if (diff < 24) { // Mucha más tolerancia horaria
                         val p = registro[MedicionesSensores.pesoGramos]
                         val g = registro[MedicionesSensores.gasPorcentaje]
-                        Pair(true, "Conectada. Peso: ${p}g | Gas: ${g}%")
-                    } else Pair(false, "Raspberry desconectada (Hace $minutos min)")
+                        Pair(true, "Online. Peso: ${p}g | Gas: ${g}%")
+                    } else Pair(false, "Estación Offline.")
                 }
             }
-        } catch (e: Exception) { Pair(false, "Error de enlace.") }
+        } catch (e: Exception) { Pair(false, "Error hardware.") }
     }
 
     suspend fun predecirImagen(base64: String, idDispositivo: Int? = null): PredictionResult {
@@ -73,16 +71,15 @@ object PredictionService {
         val (online, mensajeHardware) = obtenerEstadoHardware(idDispositivo)
         val b64Limpio = limpiarBase64(base64)
         
-        // Prompt mejorado para veredicto de salud agresivo y deteccion real.
         val prompt = """
-            Eres un experto en calidad alimentaria. Analiza la imagen. 
+            Eres un inspector de alimentos. Analiza la imagen.
             Responde JSON plano:
-            1. 'fruta': Nombre real (ej. Manzana). Pon 'NULO' solo si es algo que NO es comida.
+            1. 'fruta': Nombre real (ej: Platano). Solo pon 'NULO' si no hay comida.
             2. 'estado': Fresco, Maduro o Deteriorado.
-            3. 'porcentaje': 0-100. SE RIGUROSO: Si ves moho o pudrición, el valor DEBE ser menor a 15.
-            4. 'dias': Vida útil estimada (ej. '0 dias' si esta mal).
-            5. 'comer': 3 sugerencias con \n. Si la salud es < 30, SOLO aconseja desechar.
-            Contexto hardware: $mensajeHardware.
+            3. 'porcentaje': 0-100. SE RIGUROSO: Si esta podrido pon menor a 15.
+            4. 'dias': Vida útil.
+            5. 'comer': 3 sugerencias con \n.
+            Datos hardware: $mensajeHardware.
         """.trimIndent()
         
         return try {
@@ -107,11 +104,12 @@ object PredictionService {
                 }.toString())
             }
             
-            val content = Json.parseToJsonElement(response.bodyAsText()).jsonObject["choices"]?.jsonArray?.get(0)?.jsonObject?.get("message")?.jsonObject?.get("content")?.jsonPrimitive?.content ?: ""
+            val json = Json.parseToJsonElement(response.bodyAsText()).jsonObject
+            val content = json["choices"]?.jsonArray?.get(0)?.jsonObject?.get("message")?.jsonObject?.get("content")?.jsonPrimitive?.content ?: ""
             val res = Json.parseToJsonElement(content).jsonObject
             
             val fruta = res["fruta"]?.jsonPrimitive?.content ?: "NULO"
-            if (fruta.contains("NULO", true)) return PredictionResult("No detectado", "N/A", 0.0, "N/A", "N/A", false, hardwareOnline = online, hardwareMensaje = mensajeHardware)
+            if (fruta.contains("NULO", true)) return PredictionResult("Identificando...", "N/A", 0.0, "N/A", "N/A", false, hardwareOnline = online, hardwareMensaje = mensajeHardware)
 
             val salud = res["porcentaje"]?.jsonPrimitive?.doubleOrNull ?: 0.0
 
@@ -128,7 +126,7 @@ object PredictionService {
                 hardwareMensaje = mensajeHardware
             )
         } catch (e: Exception) {
-            PredictionResult("Error", null, 0.0, null, null, false, errorOcurrido = true, mensajeError = e.message)
+            PredictionResult("Error", null, 0.0, null, null, false, errorOcurrido = true)
         }
     }
 
