@@ -11,7 +11,9 @@ import org.jetbrains.exposed.sql.select
 import org.jetbrains.exposed.sql.transactions.experimental.newSuspendedTransaction
 import org.jetbrains.exposed.sql.SortOrder
 import java.time.LocalDateTime
-import java.time.Duration
+import java.time.temporal.ChronoUnit
+import javax.imageio.ImageIO
+import java.io.ByteArrayInputStream
 
 @Serializable
 data class PredictionResult(
@@ -27,10 +29,9 @@ data class PredictionResult(
     val alertaRiesgo: String? = null,
     val infoHardware: String? = null,
     val hardwareOnline: Boolean = false,
-    val hardwareMensaje: String = "Esperando hardware..."
+    val hardwareMensaje: String = "Buscando Raspberry..."
 )
 
-// Motor de diagnóstico experto optimizado para reconocimiento de frutas dañadas.
 object PredictionService {
     private val iaClient = HttpClient(CIO)
 
@@ -39,44 +40,48 @@ object PredictionService {
     }
 
     private fun limpiarBase64(raw: String): String {
-        return if (raw.contains(",")) raw.substringAfter(",") 
-               else raw.replace("\n", "").replace("\r", "").trim()
+        return raw.substringAfter("base64,").replace("\n", "").replace("\r", "").replace(" ", "").trim()
     }
 
     private suspend fun obtenerEstadoHardware(id: Int?): Pair<Boolean, String> {
-        if (id == null) return Pair(false, "Cámara")
+        if (id == null) return Pair(false, "Modo Cámara Directa")
         return try {
             newSuspendedTransaction {
                 val registro = MedicionesSensores.select { MedicionesSensores.dispositivoId eq id }
                     .orderBy(MedicionesSensores.id to SortOrder.DESC)
                     .limit(1).singleOrNull()
 
-                if (registro == null) Pair(false, "Sin estación.")
+                if (registro == null) Pair(false, "Sin datos en la nube.")
                 else {
                     val fecha = registro[MedicionesSensores.fechaMedicion]
-                    val diff = Duration.between(fecha, LocalDateTime.now()).seconds
-                    if (diff < 60) Pair(true, "Online. Peso: ${registro[MedicionesSensores.pesoGramos]}g")
-                    else Pair(false, "Offline.")
+                    // Ajuste por Zona Horaria: Si la diferencia es menor a 12 horas, lo tomamos como reciente.
+                    val minutos = ChronoUnit.MINUTES.between(fecha, LocalDateTime.now())
+                    if (Math.abs(minutos) < 720) { // Tolerancia para cualquier zona horaria
+                        val p = registro[MedicionesSensores.pesoGramos]
+                        val g = registro[MedicionesSensores.gasPorcentaje]
+                        Pair(true, "Conectada. Peso: ${p}g | Gas: ${g}%")
+                    } else Pair(false, "Raspberry desconectada (Hace $minutos min)")
                 }
             }
-        } catch (e: Exception) { Pair(false, "Error hardware.") }
+        } catch (e: Exception) { Pair(false, "Error de enlace.") }
     }
 
     suspend fun predecirImagen(base64: String, idDispositivo: Int? = null): PredictionResult {
         val apiKey = findApiKey()
-        if (apiKey == "FALTA_KEY") return PredictionResult("Falta Clave", null, 0.0, null, null, false, errorOcurrido = true)
+        if (apiKey == "FALTA_KEY") return PredictionResult("Error Clave", null, 0.0, null, null, false, errorOcurrido = true)
         
         val (online, mensajeHardware) = obtenerEstadoHardware(idDispositivo)
         val b64Limpio = limpiarBase64(base64)
         
+        // Prompt mejorado para veredicto de salud agresivo y deteccion real.
         val prompt = """
-            Eres un inspector de calidad de alimentos. Analiza la imagen. 
+            Eres un experto en calidad alimentaria. Analiza la imagen. 
             Responde JSON plano:
-            1. 'fruta': Nombre común (ej: Manzana, Plátano). Solo pon 'NULO' si no hay nada de comida.
+            1. 'fruta': Nombre real (ej. Manzana). Pon 'NULO' solo si es algo que NO es comida.
             2. 'estado': Fresco, Maduro o Deteriorado.
-            3. 'porcentaje': 0-100. SIEMPRE asigna un valor real. Si está podrida, pon entre 0 y 15.
-            4. 'dias': Vida útil (ej: 0 días si está podrida).
-            5. 'comer': 3 sugerencias con \n. (Si está mal, aconseja no comer).
+            3. 'porcentaje': 0-100. SE RIGUROSO: Si ves moho o pudrición, el valor DEBE ser menor a 15.
+            4. 'dias': Vida útil estimada (ej. '0 dias' si esta mal).
+            5. 'comer': 3 sugerencias con \n. Si la salud es < 30, SOLO aconseja desechar.
             Contexto hardware: $mensajeHardware.
         """.trimIndent()
         
@@ -102,19 +107,16 @@ object PredictionService {
                 }.toString())
             }
             
-            val json = Json.parseToJsonElement(response.bodyAsText()).jsonObject
-            val content = json["choices"]?.jsonArray?.get(0)?.jsonObject?.get("message")?.jsonObject?.get("content")?.jsonPrimitive?.content ?: ""
+            val content = Json.parseToJsonElement(response.bodyAsText()).jsonObject["choices"]?.jsonArray?.get(0)?.jsonObject?.get("message")?.jsonObject?.get("content")?.jsonPrimitive?.content ?: ""
             val res = Json.parseToJsonElement(content).jsonObject
             
-            val nombre = res["fruta"]?.jsonPrimitive?.content ?: "NULO"
-            if (nombre.contains("NULO", true)) {
-                return PredictionResult("No detectado", "N/A", 0.0, "N/A", "N/A", false, hardwareOnline = online, hardwareMensaje = mensajeHardware)
-            }
+            val fruta = res["fruta"]?.jsonPrimitive?.content ?: "NULO"
+            if (fruta.contains("NULO", true)) return PredictionResult("No detectado", "N/A", 0.0, "N/A", "N/A", false, hardwareOnline = online, hardwareMensaje = mensajeHardware)
 
             val salud = res["porcentaje"]?.jsonPrimitive?.doubleOrNull ?: 0.0
 
             PredictionResult(
-                fruta = nombre,
+                fruta = fruta,
                 estado = res["estado"]?.jsonPrimitive?.content,
                 porcentajeFrescura = salud,
                 sugerencias = res["dias"]?.jsonPrimitive?.content,
