@@ -10,7 +10,7 @@ import org.jetbrains.exposed.sql.select
 import org.jetbrains.exposed.sql.transactions.experimental.newSuspendedTransaction
 import org.mindrot.jbcrypt.BCrypt
 
-// Modulo de gestion de autenticacion y analisis de alimentos.
+// Modulo de rutas para la gestion de autenticacion y operaciones de catalogo.
 fun Route.authRouting() {
 
     route("/auth") {
@@ -46,7 +46,32 @@ fun Route.authRouting() {
     }
 
     route("/api") {
-        // Procesamiento de alimentos: Analisis por IA si hay imagen o registro manual en BD.
+        // Obtiene la ultima medicion de los sensores para mostrarla en el dashboard.
+        get("/sensores/ultimo") {
+            try {
+                val medicion = newSuspendedTransaction {
+                    MedicionesSensores
+                        .select { MedicionesSensores.dispositivoId eq 1 }
+                        .orderBy(MedicionesSensores.id to org.jetbrains.exposed.sql.SortOrder.DESC)
+                        .limit(1)
+                        .map {
+                            SensorDataRequest(
+                                deviceId = it[MedicionesSensores.dispositivoId],
+                                peso = it[MedicionesSensores.pesoGramos] / 1000.0, // Convertimos de vuelta a Kg
+                                humedad = it[MedicionesSensores.humedad],
+                                temperatura = it[MedicionesSensores.temperatura],
+                                gas = it[MedicionesSensores.gasPorcentaje]
+                            )
+                        }.singleOrNull()
+                }
+                if (medicion != null) call.respond(HttpStatusCode.OK, medicion)
+                else call.respond(HttpStatusCode.NotFound, "No hay mediciones aun")
+            } catch (e: Exception) {
+                call.respond(HttpStatusCode.InternalServerError, "Error al consultar sensores")
+            }
+        }
+
+        // Procesamiento de alimentos: Analisis por IA enriquecido con sensores.
         post("/alimentos") {
             try {
                 val request = call.receive<AlimentoRequest>()
@@ -54,19 +79,17 @@ fun Route.authRouting() {
                 if (!request.imagenBytesBase64.isNullOrBlank()) {
                     val resultadoIa = PredictionService.predecirImagen(request.imagenBytesBase64)
                     
-                    // Si hubo un error en la deteccion, informamos el motivo real.
-                    val esExitoso = !resultadoIa.errorOcurrido && resultadoIa.fruta != null
-                    
+                    // El campo alimento ya viene traducido o identificado por la IA.
                     call.respond(
                         HttpStatusCode.OK,
                         AlimentoResponse(
-                            exitoso = true, // Mantenemos en true para asegurar la visibilidad de la tarjeta
-                            mensaje = if (resultadoIa.errorOcurrido) "Aviso: ${resultadoIa.mensajeError ?: "Analisis limitado"}" else "Deteccion finalizada",
-                            alimento = resultadoIa.fruta ?: "Alimento",
-                            estado = resultadoIa.estado ?: "Analizado",
+                            exitoso = !resultadoIa.errorOcurrido,
+                            mensaje = if (resultadoIa.errorOcurrido) "Error en el procesamiento" else "Deteccion finalizada",
+                            alimento = resultadoIa.fruta,
+                            estado = resultadoIa.estado,
                             porcentajeFrescura = resultadoIa.porcentajeFrescura,
-                            sugerencia = resultadoIa.sugerencias ?: "Verificar visualmente.",
-                            recetas = resultadoIa.recetas ?: "Consumir segun preferencia."
+                            sugerencia = resultadoIa.sugerencias,
+                            recetas = resultadoIa.recetas
                         )
                     )
                     return@post
