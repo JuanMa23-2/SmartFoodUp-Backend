@@ -82,13 +82,13 @@ fun Route.authRouting() {
                         HttpStatusCode.OK,
                         AlimentoResponse(
                             exitoso = !resultadoIa.errorOcurrido,
-                            mensaje = if (resultadoIa.errorOcurrido) "Error en el procesamiento" else "Deteccion finalizada",
+                            mensaje = if (resultadoIa.errorOcurrido) "Error en el procesamiento" else "Detección finalizada",
                             alimento = resultadoIa.fruta,
                             estado = resultadoIa.estado,
                             porcentajeFrescura = resultadoIa.porcentajeFrescura,
                             sugerencia = resultadoIa.sugerencias,
                             recetas = resultadoIa.recetas,
-                            // Nuevos campos de hardware para el celular
+                            // Los sensores solo vendrán si idDispositivo no es null
                             datosSensores = resultadoIa.infoHardware,
                             alertaRiesgo = resultadoIa.alertaRiesgo
                         )

@@ -42,7 +42,9 @@ data class AlimentoResponse(
     val sugerencia: String? = null,
     val recetas: String? = null,
     val datosSensores: String? = null,
-    val alertaRiesgo: String? = null
+    val alertaRiesgo: String? = null,
+    val hardwareOnline: Boolean? = null,
+    val hardwareMensaje: String? = null
 )
 
 @Serializable

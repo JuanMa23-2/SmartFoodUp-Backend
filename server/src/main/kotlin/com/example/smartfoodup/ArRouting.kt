@@ -6,47 +6,44 @@ import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
 
-// Modulo de rutas para la gestion de analisis en tiempo real para Realidad Aumentada.
+// Módulo de Realidad Aumentada con soporte para sensores externos.
 fun Route.arRouting() {
 
     route("/api/ar") {
-        // Endpoint optimizado para el analisis de fotogramas de RA.
         post("/analisis") {
             try {
                 val request = call.receive<AlimentoRequest>()
                 
                 if (request.imagenBytesBase64.isNullOrBlank()) {
-                    call.respond(HttpStatusCode.OK, AlimentoResponse(false, "Camara en espera"))
+                    call.respond(HttpStatusCode.OK, AlimentoResponse(false, "Flujo inactivo"))
                     return@post
                 }
 
-                val resultado = PredictionService.predecirImagen(request.imagenBytesBase64)
+                // Si request.dispositivoId es null, no buscara sensores (RA Normal)
+                // Si es 1 (o el ID enviado), activara la Estacion Inteligente en RA
+                val resultado = PredictionService.predecirImagen(request.imagenBytesBase64, request.dispositivoId)
 
-                // En RA somos mas estrictos: solo enviamos exitoso: true si hay datos claros.
-                if (resultado.errorOcurrido || resultado.fruta == null) {
-                    call.respond(
-                        HttpStatusCode.OK,
-                        AlimentoResponse(
-                            exitoso = false,
-                            mensaje = "Identificando alimento..."
-                        )
-                    )
+                if (resultado.errorOcurrido || resultado.fruta == "No detectado") {
+                    call.respond(HttpStatusCode.OK, AlimentoResponse(false, "Identificando..."))
                 } else {
                     call.respond(
                         HttpStatusCode.OK,
                         AlimentoResponse(
                             exitoso = true,
-                            mensaje = "Deteccion exitosa",
+                            mensaje = "Detección activa",
                             alimento = resultado.fruta,
                             estado = resultado.estado,
                             porcentajeFrescura = resultado.porcentajeFrescura,
                             sugerencia = resultado.sugerencias,
-                            recetas = resultado.recetas
+                            recetas = resultado.recetas,
+                            // Datos que solo se llenan en modo Estacion Inteligente
+                            datosSensores = resultado.infoHardware,
+                            alertaRiesgo = resultado.alertaRiesgo
                         )
                     )
                 }
             } catch (e: Exception) {
-                call.respond(HttpStatusCode.OK, AlimentoResponse(false, "Analizando entorno..."))
+                call.respond(HttpStatusCode.OK, AlimentoResponse(false, "Procesando..."))
             }
         }
     }
