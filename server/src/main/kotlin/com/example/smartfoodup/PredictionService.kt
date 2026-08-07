@@ -30,7 +30,7 @@ data class PredictionResult(
     val hardwareMensaje: String? = null
 )
 
-// Motor de diagnóstico inteligente optimizado.
+// Motor de diagnóstico restaurado con filtrado de mensajes de hardware.
 object PredictionService {
     private val iaClient = HttpClient(CIO)
 
@@ -57,10 +57,9 @@ object PredictionService {
                     val g = registro[MedicionesSensores.gasPorcentaje]
                     val t = registro[MedicionesSensores.temperatura]
                     val h = registro[MedicionesSensores.humedad]
-                    // Determinamos si es reciente (ultima hora) para mayor estabilidad
                     val diff = Math.abs(Duration.between(registro[MedicionesSensores.fechaMedicion], LocalDateTime.now()).toMinutes())
                     val online = diff < 60
-                    Pair(online, "Hardware: Peso ${p}g, Gas ${g}%, Temp ${t}C, Hum ${h}%")
+                    Pair(online, "Peso: ${p}g | Gas: ${g}% | Temp: ${t}C | Hum: ${h}%")
                 }
             }
         } catch (e: Exception) { Pair(false, null) }
@@ -68,20 +67,35 @@ object PredictionService {
 
     suspend fun predecirImagen(base64: String, idDispositivo: Int? = null): PredictionResult {
         val apiKey = findApiKey()
-        if (apiKey == "FALTA_KEY") return PredictionResult("Falta Clave", null, 0.0, null, null, false, errorOcurrido = true)
+        if (apiKey == "FALTA_KEY") return PredictionResult("Error", null, 0.0, null, null, false, errorOcurrido = true)
         
         val (online, mensajeHardware) = obtenerDatosHardware(idDispositivo)
         val b64Limpio = limpiarBase64(base64)
         
-        val prompt = if (online) {
+        // PROMPT RESTAURADO PARA RESPUESTAS DETALLADAS
+        val prompt = if (idDispositivo != null && online) {
             """
-            MODO ESTACION INTELIGENTE. Sensores: $mensajeHardware.
-            Analiza imagen y sensores. Responde JSON plano: 
-            'fruta' (ej: Platano), 'estado' (Fresco/Maduro/Deteriorado), 'porcentaje' (0-100), 'dias', 'comer' (3 sugerencias numeradas con \n), 'riesgo' (analiza sensores).
-            REGLA: Si moho o color negro, salud < 15 y aconseja desechar.
+            Analiza el alimento y estos sensores: $mensajeHardware.
+            Responde JSON plano: 
+            'fruta' (nombre en español), 
+            'estado' (Fresco/Maduro/Deteriorado), 
+            'porcentaje' (salud real 0-100), 
+            'dias' (vida útil estimada), 
+            'comer' (3 sugerencias detalladas numeradas con \n),
+            'riesgo' (analiza gas/humedad).
+            REGLA: Si salud < 35, solo sugiere desecho/compostaje.
             """.trimIndent()
         } else {
-            "MODO NORMAL. Analiza la imagen. Responde JSON plano: 'fruta', 'estado', 'porcentaje' (0-100), 'dias', 'comer'. Si esta dañada, salud < 15."
+            """
+            Analiza el alimento mostrado.
+            Responde JSON plano: 
+            'fruta' (nombre en español), 
+            'estado' (Fresco/Maduro/Deteriorado), 
+            'porcentaje' (salud visual 0-100), 
+            'dias' (vida útil estimada), 
+            'comer' (3 sugerencias detalladas numeradas con \n).
+            REGLA: Si salud < 35, solo sugiere desecho/compostaje.
+            """.trimIndent()
         }
         
         return try {
@@ -106,13 +120,10 @@ object PredictionService {
                 }.toString())
             }
             
-            val json = Json.parseToJsonElement(response.bodyAsText()).jsonObject
-            val content = json["choices"]?.jsonArray?.get(0)?.jsonObject?.get("message")?.jsonObject?.get("content")?.jsonPrimitive?.content ?: ""
+            val content = Json.parseToJsonElement(response.bodyAsText()).jsonObject["choices"]?.jsonArray?.get(0)?.jsonObject?.get("message")?.jsonObject?.get("content")?.jsonPrimitive?.content ?: ""
             val res = Json.parseToJsonElement(content).jsonObject
             
-            val fruta = res["fruta"]?.jsonPrimitive?.content ?: "NULO"
-            if (fruta.contains("NULO", true)) return PredictionResult("No detectado", "N/A", 0.0, "N/A", "N/A", false)
-
+            val fruta = res["fruta"]?.jsonPrimitive?.content ?: "Identificando..."
             val salud = res["porcentaje"]?.jsonPrimitive?.doubleOrNull ?: 0.0
 
             PredictionResult(
@@ -124,11 +135,11 @@ object PredictionService {
                 esSaludable = salud > 30.0,
                 alertaRiesgo = res["riesgo"]?.jsonPrimitive?.content,
                 infoHardware = if (online) mensajeHardware else null,
-                hardwareOnline = if (online) true else null, // Solo enviamos true para mostrar, null para ocultar
+                hardwareOnline = if (online) true else null, // Nulo oculta el mensaje de "Desconectada"
                 hardwareMensaje = if (online) mensajeHardware else null
             )
         } catch (e: Exception) {
-            PredictionResult("Error de analisis", null, 0.0, null, null, false, errorOcurrido = true)
+            PredictionResult("Error", null, 0.0, null, null, false, errorOcurrido = true)
         }
     }
 
