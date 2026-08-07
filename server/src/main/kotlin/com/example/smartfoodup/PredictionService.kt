@@ -31,12 +31,10 @@ data class PredictionResult(
     val claseDetectada: String = "",
     val errorOcurrido: Boolean = false,
     val mensajeError: String? = null,
-    // Datos de la estacion inteligente
     val alertaRiesgo: String? = null,
     val infoHardware: String? = null
 )
 
-// Gestión de diagnóstico mediante IA híbrida enriquecida con datos de sensores.
 object PredictionService {
     private val iaClient = HttpClient(CIO)
 
@@ -48,7 +46,6 @@ object PredictionService {
     private var modelBundle: SavedModelBundle? = null
     
     init {
-        ImageIO.scanForPlugins()
         cargarModeloLocal()
     }
 
@@ -59,16 +56,15 @@ object PredictionService {
                 val modelDir = File(path)
                 if (modelDir.exists() && modelDir.isDirectory && File(modelDir, "saved_model.pb").exists()) {
                     modelBundle = SavedModelBundle.load(path, "serve")
-                    println("Modelo TensorFlow cargado correctamente.")
+                    println("Modelo TensorFlow cargado.")
                     break
                 }
             }
         } catch (e: Exception) {
-            println("Aviso: Motor local inactivo.")
+            println("Error modelo: \${e.message}")
         }
     }
 
-    // Consulta la telemetría más reciente del dispositivo vinculado.
     private suspend fun obtenerContextoFisico(id: Int?): String {
         if (id == null) return "Sin conexion a sensores."
         return try {
@@ -77,109 +73,66 @@ object PredictionService {
                     .orderBy(MedicionesSensores.id to SortOrder.DESC)
                     .limit(1)
                     .map { 
-                        "Sensores: Peso ${it[MedicionesSensores.pesoGramos]}g, Gas ${it[MedicionesSensores.gasPorcentaje]}%, Temp ${it[MedicionesSensores.temperatura]}C, Hum ${it[MedicionesSensores.humedad]}%."
+                        "Sensores: Peso \${it[MedicionesSensores.pesoGramos]}g, Gas \${it[MedicionesSensores.gasPorcentaje]}%, Temp \${it[MedicionesSensores.temperatura]}C, Hum \${it[MedicionesSensores.humedad]}%."
                     }.singleOrNull() ?: "Sin mediciones recientes."
             }
-        } catch (e: Exception) { "Error al leer hardware." }
+        } catch (e: Exception) { "Error sensores." }
     }
 
     suspend fun predecirImagen(base64: String, idDispositivo: Int? = null): PredictionResult {
         val apiKey = findApiKey()
-        if (apiKey == "FALTA_KEY") {
-            return PredictionResult("Falta Clave", null, 0.0, "N/A", null, false, errorOcurrido = true)
-        }
-
-        // Si hay un ID de dispositivo, traemos los datos de la Raspberry para la IA.
+        if (apiKey == "FALTA_KEY") return PredictionResult("Falta Clave", null, 0.0, "N/A", null, false, errorOcurrido = true)
         val contextoHardware = obtenerContextoFisico(idDispositivo)
         val cleanB64 = base64.substringAfter(",").replace("\n", "").replace("\r", "").replace(" ", "")
-        
         return predecirConOpenAITotal(cleanB64, apiKey, contextoHardware)
     }
 
-    private fun realizarInferenciaReal(cleanB64: String): Int {
-        val bundle = modelBundle ?: throw Exception("Sin modelo")
-        val imageBytes = Base64.getDecoder().decode(cleanB64)
-        val image = ImageIO.read(ByteArrayInputStream(imageBytes)) ?: throw Exception("Imagen invalida")
-        val resized = BufferedImage(224, 224, BufferedImage.TYPE_INT_RGB)
-        resized.createGraphics().drawImage(image, 0, 0, 224, 224, null)
-
-        val inputData = NdArrays.ofFloats(Shape.of(1, 224, 224, 3))
-        for (y in 0 until 224) {
-            for (x in 0 until 224) {
-                val p = resized.getRGB(x, y)
-                inputData.setFloat(((p shr 16) and 0xFF) / 255.0f, 0, y.toLong(), x.toLong(), 0)
-                inputData.setFloat(((p shr 8) and 0xFF) / 255.0f, 0, y.toLong(), x.toLong(), 1)
-                inputData.setFloat((p and 0xFF) / 255.0f, 0, y.toLong(), x.toLong(), 2)
-            }
-        }
-
-        val signature = bundle.metaGraphDef().getSignatureDefOrThrow("serving_default")
-        val inputName = signature.getInputsMap().values.first().getName().substringBefore(":")
-        val outputName = signature.getOutputsMap().values.first().getName().substringBefore(":")
-
-        TFloat32.tensorOf(inputData).use { t ->
-            val result = bundle.session().runner().feed(inputName, t).fetch(outputName).run()
-            result.use { res ->
-                val probs = res[0] as TFloat32
-                var max = 0; var maxP = -1.0f
-                for (i in 0 until 36) {
-                    val p = probs.getFloat(0, i.toLong())
-                    if (p > maxP) { maxP = p; max = i }
-                }
-                return max
-            }
-        }
+    suspend fun mapearPrediccion(idx: Int, key: String = findApiKey()): PredictionResult {
+        val raw = classNames.getOrElse(idx) { "Apple__Healthy" }
+        val partes = raw.split("__")
+        val nombre = traducciones[partes[0]] ?: partes[0]
+        val esSaludable = !raw.contains("Rotten", true)
+        return obtenerSugerenciasOpenAI(nombre, if(esSaludable) "Fresco" else "Deteriorado", esSaludable, raw, key)
     }
 
-    private suspend fun predecirConOpenAITotal(cleanB64: String, key: String, hardware: String): PredictionResult {
-        val prompt = """
-            Analiza la imagen y los datos de sensores: $hardware.
-            Responde JSON plano: 'fruta', 'estado', 'porcentaje', 'dias', 'comer' (3 sugerencias con \n), 'riesgo' (Alerta segun clima/gas), 'inventario' (Sugerencia segun el peso).
-            Si no hay fruta responde 'NULO' en fruta.
-        """.trimIndent()
-
+    private suspend fun obtenerSugerenciasOpenAI(fruta: String, estado: String, saludable: Boolean, raw: String, key: String): PredictionResult {
+        val prompt = "Analiza: \$fruta (\$estado). JSON plano: {\"porcentaje\": 90, \"dias\": \"X dias\", \"comer\": \"3 sugerencias \\n\"}"
         return try {
             val response: HttpResponse = iaClient.post("https://api.openai.com/v1/chat/completions") {
-                header(HttpHeaders.Authorization, "Bearer $key")
+                header(HttpHeaders.Authorization, "Bearer \$key")
                 contentType(ContentType.Application.Json)
                 setBody(buildJsonObject {
                     put("model", "gpt-4o-mini")
-                    put("messages", buildJsonArray {
-                        add(buildJsonObject {
-                            put("role", "user")
-                            put("content", buildJsonArray {
-                                add(buildJsonObject { put("type", "text"); put("text", prompt) })
-                                add(buildJsonObject { 
-                                    put("type", "image_url")
-                                    put("image_url", buildJsonObject { put("url", "data:image/jpeg;base64,$cleanB64") })
-                                })
-                            })
-                        })
-                    })
+                    put("messages", buildJsonArray { add(buildJsonObject { put("role", "user"); put("content", prompt) }) })
                     put("response_format", buildJsonObject { put("type", "json_object") })
                 }.toString())
             }
-            
             val content = Json.parseToJsonElement(response.bodyAsText()).jsonObject["choices"]?.jsonArray?.get(0)?.jsonObject?.get("message")?.jsonObject?.get("content")?.jsonPrimitive?.content ?: ""
             val res = Json.parseToJsonElement(content).jsonObject
-            
-            val nombre = res["fruta"]?.jsonPrimitive?.content ?: "NULO"
-            if (nombre.contains("NULO", true)) {
-                return PredictionResult("No se detecto alimento", "N/A", 0.0, "N/A", "N/A", false)
-            }
-
-            PredictionResult(
-                fruta = nombre,
-                estado = res["estado"]?.jsonPrimitive?.content,
-                porcentajeFrescura = res["porcentaje"]?.jsonPrimitive?.doubleOrNull ?: 85.0,
-                sugerencias = res["dias"]?.jsonPrimitive?.content,
-                recetas = res["comer"]?.jsonPrimitive?.content,
-                esSaludable = true,
-                alertaRiesgo = res["riesgo"]?.jsonPrimitive?.content,
-                infoHardware = hardware
-            )
-        } catch (e: Exception) {
-            PredictionResult("Error Smart Station", "N/A", 0.0, "N/A", "N/A", false, "ERROR")
-        }
+            PredictionResult(fruta, estado, res["porcentaje"]?.jsonPrimitive?.doubleOrNull ?: 90.0, res["dias"]?.jsonPrimitive?.content, res["comer"]?.jsonPrimitive?.content, saludable, raw)
+        } catch (e: Exception) { PredictionResult(fruta, estado, 85.0, "Visual.", "Lavar.", saludable, raw) }
     }
+
+    private suspend fun predecirConOpenAITotal(cleanB64: String, key: String, hardware: String): PredictionResult {
+        val prompt = "Imagen y sensores: \$hardware. JSON plano: 'fruta', 'estado', 'porcentaje', 'dias', 'comer', 'riesgo', 'inventario'."
+        return try {
+            val response: HttpResponse = iaClient.post("https://api.openai.com/v1/chat/completions") {
+                header(HttpHeaders.Authorization, "Bearer \$key")
+                contentType(ContentType.Application.Json)
+                setBody(buildJsonObject {
+                    put("model", "gpt-4o-mini")
+                    put("messages", buildJsonArray { add(buildJsonObject { put("role", "user"); put("content", buildJsonArray { add(buildJsonObject { put("type", "text"); put("text", prompt) }); add(buildJsonObject { put("type", "image_url"); put("image_url", buildJsonObject { put("url", "data:image/jpeg;base64,\$cleanB64") }) }) }) }) })
+                    put("response_format", buildJsonObject { put("type", "json_object") })
+                }.toString())
+            }
+            val content = Json.parseToJsonElement(response.bodyAsText()).jsonObject["choices"]?.jsonArray?.get(0)?.jsonObject?.get("message")?.jsonObject?.get("content")?.jsonPrimitive?.content ?: ""
+            val res = Json.parseToJsonElement(content).jsonObject
+            val nombre = res["fruta"]?.jsonPrimitive?.content ?: "NULO"
+            if (nombre.contains("NULO", true)) return PredictionResult("No se detecto alimento", "N/A", 0.0, "N/A", "N/A", false)
+            PredictionResult(nombre, res["estado"]?.jsonPrimitive?.content, res["porcentaje"]?.jsonPrimitive?.doubleOrNull ?: 85.0, res["dias"]?.jsonPrimitive?.content, res["comer"]?.jsonPrimitive?.content, true, alertaRiesgo = res["riesgo"]?.jsonPrimitive?.content, infoHardware = hardware)
+        } catch (e: Exception) { PredictionResult("Error", "N/A", 0.0, "N/A", "N/A", false) }
+    }
+
+    private val classNames = listOf("Apple__Healthy", "Apple__Rotten", "Banana__Healthy", "Banana__Rotten", "Bellpepper__Healthy", "Bellpepper__Rotten", "Carrot__Healthy", "Carrot__Rotten", "Cucumber__Healthy", "Cucumber__Rotten", "Grape__Healthy", "Grape__Rotten", "Guava__Healthy", "Guava__Rotten", "Jujube__Healthy", "Jujube__Rotten", "Lemon__Healthy", "Lemon__Rotten", "Lulo__Healthy", "Lulo__Rotten", "Mango__Healthy", "Mango__Rotten", "Okra__Healty", "Okra__Rotten", "Orange__Healthy", "Orange__Rotten", "Pomegranate__Healthy", "Pomegranate__Rotten", "Potato__Healthy", "Potato__Rotten", "Strawberry__Healthy", "Strawberry__Rotten", "Tamarillo__Healthy", "Tamarillo__Rotten", "Tomato__Healthy", "Tomato__Rotten")
+    private val traducciones = mapOf("Apple" to "Manzana", "Banana" to "Platano", "Bellpepper" to "Pimiento", "Carrot" to "Zanahoria", "Cucumber" to "Pepino", "Grape" to "Uva", "Guava" to "Guayaba", "Jujube" to "Azufaifa", "Lemon" to "Limon", "Lulo" to "Lulo", "Mango" to "Mango", "Okra" to "Okra", "Orange" to "Naranja", "Pomegranate" to "Granada", "Potato" to "Papa", "Strawberry" to "Fresa", "Tamarillo" to "Tomate de arbol", "Tomato" to "Tomate")
 }
